@@ -5,6 +5,7 @@ Use this to import your NHS Payslips into associative arrays (and then do what y
 
 ## SETUP
 clone https://github.com/smalot/pdfparser
+## Then
 In parse_payslip.php
 - change the inlcude to the alt_autoload.php-dist file from wherever you cloned the smalot repo
 - add whichever payslips you want to parse to /payslips
