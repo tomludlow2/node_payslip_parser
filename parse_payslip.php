@@ -7,7 +7,7 @@
 	--Requires PDF Parser Module
 	*/
 	
-	include "/home/tom/money/pdfparser/pdfparser/alt_autoload.php-dist";
+	include "/var/www/pay/pdfparser/alt_autoload.php-dist";
 
 	function to_date($d) {
 		$bits = explode(" ", $d);
@@ -285,6 +285,6 @@
 		return $payslip;
 	}
 
-	//echo print_r(parse_payslip('payslips/2019-09.pdf', 1));
+	echo print_r(parse_payslip('payslips/2019-02.pdf', 1));
 
 ?>
