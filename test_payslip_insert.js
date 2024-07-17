@@ -3,7 +3,7 @@ const username = "tomludlow";
 
 const fs = require("fs");
 
-const testfile = "converted_payslips/2020-05.json";
+const testfile = "converted_payslips/2018-08.json";
 
 try {
   const payslipJsonString = fs.readFileSync(testfile, 'utf8');
