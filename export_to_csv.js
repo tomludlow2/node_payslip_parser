@@ -1,10 +1,13 @@
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
 const pool = require('./database'); // Import the PostgreSQL connection pool
+const { parse } = require('json2csv');
 
 // Define fields to export from the database table
-const fields_to_export = ['id', 'filename', 'pay_date', 'username', 'total_payments', 'total_deductions', 'demographics->>tax_paid'];
+const fields_to_export = [
+  'id', 'filename', 'pay_date', 'username', 'total_payments', 'total_deductions',
+  "(year_to_date->>'tax_paid')::numeric AS tax_paid" // Extract tax_paid from year_to_date JSONB
+];
 
 async function exportToCsv(username) {
   const exportDirectory = path.join(__dirname, 'exports', username);
@@ -22,17 +25,23 @@ async function exportToCsv(username) {
     // Connect to PostgreSQL
     client = await pool.connect();
 
-    // Query to fetch all payslips for the user
+    // Construct the SQL query dynamically
     const query = `
       SELECT ${fields_to_export.join(', ')}
       FROM payslips
       WHERE username = $1
+      ORDER BY pay_date ASC
     `;
 
     const result = await client.query(query, [username]);
+    console.log( result );
 
     // Convert result rows to CSV format
-    const csvData = convertToCsv(result.rows);
+    // Convert rows to CSV format
+    const csvData = parse(result.rows);
+
+    // Write CSV data to file
+    fs.writeFileSync(filePath, csvData);
 
     // Write CSV data to file
     fs.writeFileSync(filePath, csvData);
@@ -54,32 +63,31 @@ function formatDate(date) {
   const mm = String(date.getMonth() + 1).padStart(2, '0'); // January is 0!
   const yyyy = date.getFullYear();
   const hh = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
   const ss = String(date.getSeconds()).padStart(2, '0');
-  return `${dd}_${mm}_${yyyy}_${hh}_${ss}`;
+  return `${dd}_${mm}_${yyyy}_${hh}_${min}_${ss}`;
 }
 
-function convertToCsv(rows) {
-  const header = fields_to_export.join(',');
-  const csvRows = rows.map(row => fields_to_export.map(field => {
-    if (field.includes('->')) {
-      const [jsonbField, nestedField] = field.split('->>');
-      return row[jsonbField] ? row[jsonbField][nestedField] : '';
-    }
-    return row[field];
-  }).join(','));
-  return `${header}\n${csvRows.join('\n')}`;
-}
+function convertToCsv(rows, fields) {
+  // Ensure proper CSV formatting based on fields_to_export
+  const header = fields.map(field => {
+    // Handle aliasing and CSV quoting if necessary
+    return typeof field === 'string' ? `"${field.replace(/"/g, '""')}"` : field;
+  }).join(',');
 
-// Export the function for use in other modules or command line
-module.exports = exportToCsv;
+  const rowsCsv = rows.map(row => fields.map(field => {
+    const value = row[field];
+    return typeof value === 'string' ? `"${value.replace(/"/g, '""')}"` : value;
+  }).join(',')).join('\n');
+
+  return `${header}\n${rowsCsv}`;
+}
 
 // Usage example: node export_to_csv.js tomludlow
-if (!module.parent) {
-  if (process.argv.length < 3) {
-    console.error('Please provide a username as an argument');
-    process.exit(1);
-  }
-  
-  const username = process.argv[2];
-  exportToCsv(username);
+if (process.argv.length < 3) {
+  console.error('Please provide a username as an argument');
+  process.exit(1);
 }
+
+const username = process.argv[2];
+exportToCsv(username);
