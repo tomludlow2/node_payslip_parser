@@ -50,7 +50,7 @@ async function send_to_postgres(username, payslipData, override = false) {
       pay_date, net_pay
     } = payslipData;
 
-    const hash = crypto.createHash('sha256').update(JSON.stringify(payslipData));
+    const hash = crypto.createHash('sha256').update(JSON.stringify(payslipData)).digest('hex');
 
     // Execute the query with parameters
     try {
