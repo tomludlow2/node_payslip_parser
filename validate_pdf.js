@@ -1,25 +1,7 @@
-const fs = require('fs');
-const PDFParser = require('pdf-parse');
-
-console.log("Validating PDFs");
-//Comment
-// Function to read a PDF file and return its text content
-async function readPDF(file) {
-  return new Promise((resolve, reject) => {
-    let dataBuffer = fs.readFileSync(file);
-    PDFParser(dataBuffer).then((data) => {
-      resolve(data.text);
-    }).catch((err) => {
-      reject(err);
-    });
-  });
-}
-
 // Function to perform tests on a PDF text
 async function performTests(pdfText) {
   try {
     // Test 1: Consistency in Employee Information
-    //const test1 = /EMPLOYEE NAME[\s\S]*?EMPLOYEENO\.[\s\S]*?PAY DATE/g.test(pdfText);
     const test1 = /ASSIGNMENT NUMBER\s*EMPLOYEE NAME[\s\S]*?DEPARTMENT\s*JOB TITLE[\s\S]*?PAYSCALE DESCRIPTION/g.test(pdfText);
     
     // Test 2: Verification of Pay and Deductions Sections
@@ -50,35 +32,17 @@ async function performTests(pdfText) {
   }
 }
 
-// Example usage: Replace with your actual PDF file paths
-const pdfFiles = [
-  'payslips/2018-11.pdf',
-  'payslips/2019-02.pdf',
-  'payslips/2020-05.pdf',
-  'payslips/2022-03.pdf',
-  'payslips/2023-06.pdf',
-  // Add more PDF paths as needed
-];
-
-// Function to validate multiple PDFs
-async function validatePDFs(pdfFiles) {
-  for (let i = 0; i < pdfFiles.length; i++) {
-    try {
-      const pdfText = await readPDF(pdfFiles[i]);
-      console.log(`\nPerforming tests for PDF ${i + 1}:`);
-      const testsPassed = await performTests(pdfText);
-      
-      if (testsPassed) {
-        console.log(`PDF ${i + 1} passed all tests.`);
-      } else {
-        console.log(`PDF ${i + 1} did not pass all tests.`);
-      }
-      
-    } catch (err) {
-      console.error(`Error processing PDF ${i + 1}:`, err);
-    }
+// Function to validate PDF text based on tests
+async function validate_pdf(pdfText) {
+  const testsPassed = await performTests(pdfText);
+  
+  if (testsPassed) {
+    console.log(`PDF passed all tests.`);
+    return true;
+  } else {
+    console.log(`PDF did not pass all tests.`);
+    return false;
   }
 }
 
-// Call the function to validate PDFs
-validatePDFs(pdfFiles);
+module.exports = { validate_pdf };

@@ -1,14 +1,15 @@
-# php_nhs_payslip_parser
+# node_payslip_parser
 
-This is moving to a node-base approach and as such is volatile currently. 
+This uses node, and node package parse-pdf to open PDF files generated from the NHS ESR hub to convert payslips into a format that can be:
+- Saved into a database
+- Exported into an excel file
+- TBA: Added to google drive / google shee
 
-*First Git Upload, uses the smalot/pdfparser but using subrepo was too complex so just included the file in the directory structure
-Use this to import your NHS Payslips into associative arrays (and then do what you want with them)
 
 ## SETUP
 ```npm install parse-pdf```
 
-## Node usage
+## Node usage - simple process array
 ```
 const fs = require('fs');
 const {
@@ -48,31 +49,79 @@ async function processPDFs(pdfFiles) {
 processPDFs(pdfFiles);
 ```
 
+## Test Split Sections
+For more granular understanding of how the content is acquired, within each `try` block above, you can add
 
+```js
+    const pdfText = await readPDF(pdfFiles[i]);
+    console.log(`\nSplitting sections for PDF ${i + 1}:`);
+    const sections = splitSections(pdfText);
 
+    // Parse section 1
+    console.log(`\nParsing section 1 for PDF ${i + 1}:`);
+    const section_1_lines = parse_section_1(sections.section1);
+    console.log(section_1_lines);
 
+    // Output demographic lines
+    console.log("\nOutputting Demographic Lines");
+    console.log(parse_demographic_line(section_1_lines.arr_2[0]));
 
-## OLD
-## Then
-In parse_payslip.php
-- change the inlcude to the alt_autoload.php-dist file from wherever you cloned the smalot repo
-- add whichever payslips you want to parse to /payslips
-- To test:
-- - Uncomment line #288 //echo print_r(parse_payslip('payslips/2019-09.pdf', 1));
-- - Change the pdf file to one that is in your payslips folder
-- run the script
+    // Output wage lines
+    console.log("\nOutputting Wage Lines");
+    console.log(parse_wage_line(section_1_lines.arr_2[2]));
 
-Other files are all to do with inserting them automatically into a database
-- Create a database - sql file included for this
-- Run:  mv conn_sample.php conn.php
-- Run: nano conn.php
-- change the login details to your server's login details
+    // Output tax lines
+    console.log("\nOutputting Tax Lines");
+    console.log(parse_tax_line(section_1_lines.arr_2[3]));
 
-## Then:
-Run: php run_all.php
-This will open all your pdf files in the directory
-It will push them all to the server
+    // Output job line
+    console.log("\nOutputting Job Line");
+    console.log(parse_job_line(section_1_lines.arr_2[1]));
 
-## Then to get the info from the server:
-- php get_payslips.php
-- This is an example file that shows you how you might extract various bits from the server
+    // Parse section 2 into pay and deductions
+    console.log("\nSplitting section 2 into pay and deductions:");
+    const payDeductions = split_pay_deductions(sections.section2);
+    console.log(payDeductions.deductions);
+
+    // Parse pay lines
+    console.log("\nParsing pay lines next:");
+    const pay_lines = parse_pay_lines(payDeductions.pay_lines);
+    console.log(pay_lines);
+    
+    // Parse section 3
+    console.log("\nParsing section 3 next:");
+    const sec3 = parse_section_3(sections.section3);
+    console.log(sec3);
+```
+This will run through the files and output the relevant bits before showing what has been acquired
+
+## Save as JSON
+`json_functions.js` contains the relevant functions. Usage:
+
+```js
+const {  readPDF,  process_loaded_payslip } = require('./split_sections');
+const {savePayslipAsJson} = require('./json_functions');
+const pdfFile = "payslips/2018-11.pdf";
+
+const pdfText = await readPDF(pdfFile);
+const payslip_data = process_loaded_payslip(pdfText);
+
+savePayslipAsJson(payslip_data);
+
+//Note that destination directory is stored in json_functions.js
+
+````
+
+## Validation
+You can check if a payslips is valid with `validate_pdf.js`
+See an example in `test_validation.js` which validates all files in the payslips directory.
+A single test would be:
+```js
+const { readPDF } = require('./split_sections');
+const { validate_pdf } = require('./validate_pdf');
+const pdfFile = "payslips/2018-11.pdf";
+const pdfText = await readPDF(path.join(pdfFile));
+await validate_pdf(pdfText);
+
+```` 
+

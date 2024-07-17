@@ -7,7 +7,7 @@ function savePayslipAsJson(payslipData) {
   const baseFilename = path.basename(originalFilename, '.pdf');
 
   // Define the new directory and filename
-  const newDirectory = path.join(originalDirectory, '../converted_payslips');
+  const newDirectory = path.join(originalDirectory, '/converted_payslips');
   const newFilename = `${baseFilename}.json`;
 
   // Ensure the new directory exists
