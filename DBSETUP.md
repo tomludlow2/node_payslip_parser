@@ -39,8 +39,15 @@ CREATE TABLE payslips (
     tax JSONB,
     deduction_lines JSONB,
     pay_lines JSONB,
-    balances JSONB
+    this_period_summary JSONB,
+    year_to_date JSONB,
+    total_payments NUMERIC(12, 2),
+    total_deductions NUMERIC(12, 2),
+    pay_date DATE,
+    net_pay NUMERIC(12, 2),
+    file_hash VARCHAR(64) UNIQUE
 );
+
 ```
 
 5. Add Index:

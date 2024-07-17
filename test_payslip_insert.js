@@ -13,7 +13,7 @@ try {
   console.log(payslipJson);
 
   // Insert payslip data
-	send_to_postgres(username, payslipJson)
+	send_to_postgres(username, payslipJson, true)
 	  .then(() => console.log('Payslip data inserted successfully'))
 	  .catch(err => console.error('Error inserting payslip data:', err.message));
 } catch (error) {
