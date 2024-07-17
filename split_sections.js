@@ -13,6 +13,95 @@ async function readPDF(file) {
   });
 }
 
+function process_loaded_payslip(pdfText, filename) {
+  let sections = splitSections(pdfText);
+  //Section 1 contains demographics and tax
+  let section_1_lines = parse_section_1(sections.section1);
+  let demographics = parse_demographic_line(section_1_lines.arr_2[0]);
+  let job = parse_job_line(section_1_lines.arr_2[1]);
+  let wage = parse_wage_line(section_1_lines.arr_2[2]);
+  let tax = parse_tax_line(section_1_lines.arr_2[3]);
+  //Section 2 contains pay and deductions
+  let pay_deductions = split_pay_deductions(sections.section2);
+  let deduction_lines = pay_deductions.deductions
+  let pay_lines = parse_pay_lines(pay_deductions.pay_lines);
+  //Section 3 contains gross pay / year to date 
+  let balances = parse_section_3(sections.section3);
+
+  
+
+  // Extract properties for year_to_date
+  let {
+    'TAXABLEPAY': taxable_pay,
+    'TAXPAID': tax_paid,
+    'PENSIONCONTS': pension_contributions,
+    'GROSSPAY': gross_pay,
+    'NIPAY': ni_pay,
+    'OTHERNIPAY': other_ni_pay,
+    'NICONTS': ni_contributions,
+    'OTHERNICONTS': other_ni_contributions
+  } = balances;
+
+  let year_to_date = {
+    taxable_pay: taxable_pay,
+    tax_paid: tax_paid,
+    pension_contributions: pension_contributions,
+    gross_pay: gross_pay,
+    ni_pay: ni_pay,
+    other_ni_pay: other_ni_pay,
+    ni_contributions: ni_contributions,
+    other_ni_contributions: other_ni_contributions
+  };
+
+  // Extract properties for this_period_summary
+  let {
+    'PENSIONABLE PAY': pensionable_pay,
+    'TAX PERIOD': tax_period,
+    'PERIOD END DATE': period_end_date,
+    'TAXABLE PAY': period_taxable_pay,
+    'NON-TAXABLE PAY': non_taxable_pay,
+    'TOTAL PAYMENTS': total_payments,
+    'TOTAL DEDUCTIONS': total_deductions,
+    'PENSIONABLEPAY': period_pensionable_pay,
+    'NET PAY': net_pay,
+    'FREQUENCY': frequency,
+    'PAY DATE': pay_date
+  } = balances;
+
+  tax.ni_letter = balances["NILETTER"];
+
+
+  let this_period_summary = {
+    pensionable_pay: pensionable_pay,
+    tax_period: tax_period,
+    period_end_date: period_end_date,
+    period_taxable_pay: period_taxable_pay,
+    non_taxable_pay: non_taxable_pay,
+    total_payments: total_payments,
+    total_deductions: total_deductions,
+    period_pensionable_pay: period_pensionable_pay,
+    net_pay: net_pay
+  };
+
+
+   return {
+    filename: filename, 
+    demographics: demographics,
+    job: job,
+    wage: wage, 
+    tax: tax,
+    deduction_lines: deduction_lines, 
+    pay_lines: pay_lines,
+    this_period_summary: this_period_summary,
+    year_to_date: year_to_date,
+    total_payments: total_payments,
+    total_deductions: total_deductions,
+    pay_date: pay_date,
+    net_pay: net_pay
+  };
+
+}
+
 // Function to split text into three sections based on precise criteria
 function splitSections(pdfText) {
   const lines = pdfText.split('\n');
@@ -140,100 +229,61 @@ function parse_pay_lines(pay_lines) {
 
 
 function parse_section_3(section3) {
-  const lines = section3.split("\n");
-  const section3Data = {};
+  const keys = [
+    'GROSSPAY', 'TAXABLEPAY', 'PENSIONABLE PAY', 'TAXABLE PAY', 'NILETTER', 'TAXPAID', 'TAX PERIOD',
+    'NON-TAXABLE PAY', 'NIPAY', 'OTHERNIPAY', 'PREVIOUSTAXABLEPAY', 'FREQUENCY', 'TOTAL PAYMENTS', 
+    'NICONTS', 'OTHERNICONTS', 'PREVIOUSTAXPAID', 'PERIOD END DATE', 'TOTAL DEDUCTIONS', 'PENSIONABLEPAY', 
+    'PENSIONCONTS', 'PAY DATE', 'NET PAY', 'SDREFNUMBER', 'EMPLOYEENO.', 'PAY METHOD', 'MESSAGES FROM EMPLOYER'
+  ];
+  const data = section3.split("\n");
+  console.log(data);
 
-  // Regular expression patterns for specific value formats
-  const numberPattern = /^\d+(\.\d{1,2})?$/;
-  const capitalLetterPattern = /^[A-Z]$/;
-  const datePattern = /^\s*\d{1,2}\s(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s\d{4}\s*$/; // Updated date pattern
+  let result = {};
+  let failsafe = {};
+  let unprocessedItems = [];
 
-  for (let i = 0; i < lines.length; i += 2) {
-    let key = lines[i].trim();
-    let value = lines[i + 1] ? lines[i + 1].trim() : '';
 
-    // Handle keys with quotes if present
-    if (key.startsWith("'") && key.endsWith("'")) {
-      key = key.substring(1, key.length - 1);
-    }
-
-    // Stop parsing at "MESSAGES FROM EMPLOYER"
-    if (key.startsWith("MESSAGES FROM EMPLOYER")) {
-      break;
-    }
-
-    // Handle multi-line values
-    if (value === '' && key.endsWith(':')) {
-      let j = i + 2;
-      let combinedValue = lines[i + 1] ? lines[i + 1].trim() : '';
-      while (j < lines.length && !lines[j].match(/^\w+:/)) {
-        combinedValue += ' ' + lines[j].trim();
-        j++;
+  for (let i = 0; i < data.length; i++) {
+    let key = data[i];
+    if (key === 'SDREFNUMBEREMPLOYEENO.') {
+      result['SDREFNUMBER'] = 'empty';
+      if (i + 1 < data.length) {
+        result['EMPLOYEENO.'] = data[i + 1];
+        i++;
+      } else {
+        result['EMPLOYEENO.'] = 0;
       }
-      value = combinedValue.trim();
-      i = j - 2; // Move i to the last processed line
+    } else if (key === 'MESSAGES FROM EMPLOYER') {
+      failsafe[key] = data[i + 1] || '';
+      i++; // Skip the message value
+    } else if (keys.includes(key)) {
+      // Check if the next element is also a key
+      if (i + 1 < data.length && keys.includes(data[i + 1])) {
+        result[key] = 0; // Substitute missing value with 0
+      } else {
+        result[key] = data[i + 1] || 0; // Assign the next element as value or 0 if undefined
+        i++; // Skip the value
+      }
+    } else {
+      unprocessedItems.push(key);
     }
-
-    // Validate and format specific key-value pairs
-    switch (key) {
-      case 'NILETTER':
-        if (value.match(capitalLetterPattern)) {
-          section3Data[key] = value;
-        } else {
-          section3Data[key] = '';
-        }
-        break;
-      case 'FREQUENCY':
-        if (/^[A-Za-z]+$/.test(value)) {
-          section3Data[key] = value;
-        } else {
-          section3Data[key] = '';
-        }
-        break;
-      case 'PERIOD END DATE':
-      case 'PAY DATE':
-        if (value.match(datePattern)) {
-          section3Data[key] = value.trim(); // Ensure trimmed
-        } else {
-          section3Data[key] = '';
-          // Check the next line for the date format
-          if (lines[i + 1] && lines[i + 1].trim().match(datePattern)) {
-            section3Data[key] = lines[i + 1].trim();
-            i++; // Move i to skip the next line
-          }
-        }
-        break;
-      case 'SDREFNUMBER':
-      case 'EMPLOYEENO.':
-        if (/^\d+$/.test(value)) {
-          section3Data[key] = value;
-        } else {
-          section3Data[key] = '';
-        }
-        break;
-      case 'PAY METHOD':
-        if (/^[A-Za-z]+$/.test(value)) {
-          section3Data[key] = value;
-        } else {
-          section3Data[key] = '';
-        }
-        break;
-      default:
-        if (value.match(numberPattern)) {
-          section3Data[key] = parseFloat(value).toFixed(2);
-        } else {
-          // Default to '0.00' for numeric keys if the value is not a valid number
-          section3Data[key] = '0.00';
-          // Adjust index to process the next key-value pair correctly
-          if (lines[i + 1] && !lines[i + 1].match(/^\w+:/)) {
-            i++;
-          }
-        }
-        break;
-    }
+    result["MESSAGES FROM EMPLOYER"]
   }
 
-  return section3Data;
+  // Process unprocessed items and include in failsafe
+  for (let i = 0; i < unprocessedItems.length; i++) {
+    let key = unprocessedItems[i];
+    if (i + 1 < unprocessedItems.length && !keys.includes(unprocessedItems[i + 1])) {
+      failsafe[key] = unprocessedItems[i + 1];
+      i++;
+    } else {
+      failsafe[key] = 0;
+    }
+  }
+  
+  console.log("Unprocessed items have been grouped as a failsafe", failsafe);
+
+  return result;
 }
 
 function parse_section_1(section1) {
@@ -383,5 +433,6 @@ module.exports = {
   parse_demographic_line,
   parse_wage_line,
   parse_tax_line,
-  parse_job_line
+  parse_job_line,
+  process_loaded_payslip
 };

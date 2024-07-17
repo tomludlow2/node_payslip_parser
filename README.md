@@ -1,10 +1,58 @@
 # php_nhs_payslip_parser
 
+This is moving to a node-base approach and as such is volatile currently. 
+
 *First Git Upload, uses the smalot/pdfparser but using subrepo was too complex so just included the file in the directory structure
 Use this to import your NHS Payslips into associative arrays (and then do what you want with them)
 
 ## SETUP
-clone https://github.com/smalot/pdfparser
+```npm install parse-pdf```
+
+## Node usage
+```
+const fs = require('fs');
+const {
+  readPDF,
+  process_loaded_payslip
+} = require('./split_sections');
+
+
+// Example usage: Replace with your actual PDF file paths
+const pdfFiles = [
+  'payslips/2018-11.pdf',
+  'payslips/2019-02.pdf',
+  'payslips/2020-05.pdf',
+  'payslips/2022-03.pdf',
+  'payslips/2023-06.pdf',
+  'payslips/2023-08.pdf',
+  // Add more PDF paths as needed
+];
+
+console.log("Testing Splitting of NHS Payslip");
+
+// Function to process and split multiple PDFs into sections
+async function processPDFs(pdfFiles) {
+  for (let i = 0; i < pdfFiles.length; i++) {
+    try {      
+      console.log("\n\n\tINFO: Attempting ", pdfFiles[i]);
+      const pdfText = await readPDF(pdfFiles[i]);
+      console.log(process_loaded_payslip(pdfText, pdfFiles[i]));
+
+    } catch (err) {
+      console.error(`Error processing PDF ${i + 1}:`, err);
+    }
+  }
+}
+
+// Call the function to process PDFs
+processPDFs(pdfFiles);
+```
+
+
+
+
+
+## OLD
 ## Then
 In parse_payslip.php
 - change the inlcude to the alt_autoload.php-dist file from wherever you cloned the smalot repo

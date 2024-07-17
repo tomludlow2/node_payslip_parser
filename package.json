@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "pdf-parse": "^1.1.1",
+    "pg": "^8.12.0"
+  }
+}
