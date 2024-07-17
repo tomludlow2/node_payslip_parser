@@ -125,3 +125,63 @@ await validate_pdf(pdfText);
 
 ```` 
 
+## Database Insertion
+See `DBSETUP.md` for how to setup and structure the postgres database
+`database.js` is the postgres database connection tool, it uses environment variables to store the login information
+
+`payslip_insert`:
+- The `send_to_postgres` function handles inserting or updating payslip data in a PostgreSQL database. It uses a connection pool (pool) to manage database connections efficiently. The function takes parameters for username, payslipData, and an optional override flag.
+- When called, it connects to the database, constructs an INSERT query for the payslips table, and handles conflicts using the file_hash field. If override is true, it updates existing records; otherwise, it avoids duplicates.
+- Data from payslipData is converted to JSONB format where needed, and a SHA-256 hash of payslipData ensures data integrity. The function logs successful insertions or updates and errors out if something goes wrong. Finally, it releases the database connection back to the pool.
+
+
+Important:  `file_hash` is used as a unique field to ensure that the same payslip is added only once. If you pass `true` as parameter 3 in `send_to_postgres` the new one will override the old row. - This is useful for error handling, if there is an error in parsing the data, then you can just edit the json files. 
+
+Example usage:
+```js
+const send_to_postgres = require('./payslip_insert.js');
+const username = "your_username";
+
+const fs = require("fs");
+
+const testfile = "converted_payslips/2019-11.json";
+
+try {
+  const payslipJsonString = fs.readFileSync(testfile, 'utf8');
+  payslipJson = JSON.parse(payslipJsonString);
+
+  console.log("Attempting to insert the following data");
+  console.log(payslipJson);
+
+  // Insert payslip data
+  send_to_postgres(username, payslipJson, true)
+    .then(() => console.log('Payslip data inserted successfully'))
+    .catch(err => console.error('Error inserting payslip data:', err.message));
+} catch (error) {
+  console.error('Error reading or parsing JSON file:', error.message);
+  return;
+}
+```
+The above version opens the json file to send, but you could just send the output from the parse file
+
+`test_payslip_batch_insert.js` contains a similar script but uses a batch array to insert into the database
+
+## View Database Entries
+`npm install cli-table3` to view this nicely
+`view_table_basic.js` demonstrates how to output from the table to the command line
+The following sql demonstrates how to read the json within json:
+```sql
+      SELECT id, filename, pay_date, username, total_payments, total_deductions,
+             (year_to_date->>'tax_paid')::numeric AS tax_paid
+      FROM payslips
+      ORDER BY pay_date ASC; -- Order by pay_date ascending (oldest first)
+```
+
+
+## Export to json
+`export_to_json.js` can be run from the command line with the argument username to export all rows to separate json files in `exports/username/username_dd_mm_yyyy_hash.json`.
+It also exports a function to be used in other scripts, that can be called. 
+
+
+## Export to csv
+`export_to_csv.js` accepts a username as a parameter at cli and outputs the file into a csv in the same directory as the json exports. 

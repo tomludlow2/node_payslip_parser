@@ -34,7 +34,6 @@ async function exportToCsv(username) {
     `;
 
     const result = await client.query(query, [username]);
-    console.log( result );
 
     // Convert result rows to CSV format
     // Convert rows to CSV format
