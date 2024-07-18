@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Viewer</title>
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+    .container {
+      padding: 20px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+    }
+    .col-md-6 {
+      width: 48%; /* Adjust width as needed */
+      position: sticky;
+      top: 20px;
+      height: calc(100vh - 80px); /* Adjust height to fit buttons container */
+      overflow-y: auto; /* Enable vertical scrolling if content exceeds viewport height */
+    }
+    .buttons-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px; /* Adjust margin as needed */
+    }
+    .buttons-container .btn-group {
+      margin-left: auto;
+    }
+    .buttons-container button {
+      margin-left: 10px; /* Adjust spacing between buttons */
+    }
+    form .form-group {
+      margin-bottom: 10px; /* Reduce bottom margin between form fields */
+    }
+    .orange-border {
+      border: 2px solid orange;
+      padding: 8px;
+    }
+    .orange-border input {
+      border: 2px solid orange;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="buttons-container mb-4">
+      <h2 class="mb-0">Approve Pending Payslip</h2>
+      <div class="btn-group">
+        <button type="button" id="submitPayslipBtn" class="btn btn-primary">Submit Payslip</button>
+        <button type="button" id="deletePayslipBtn" class="btn btn-danger">Delete Payslip</button>
+        <button type="button" id="downloadJSONBtn" class="btn btn-secondary">Download JSON</button>
+      </div>
+    </div>
+
+    <% if (messages.error && messages.error.length > 0) { %>
+      <div class="alert alert-danger">
+        <%= messages.error %>
+      </div>
+    <% } %>
+
+    <% if (messages.success && messages.success.length > 0) { %>
+      <div class="alert alert-success">
+        <%= messages.success %>
+      </div>
+    <% } %>
+
+    <div class="row">
+      <!-- Left column for displaying the PDF file -->
+      <div class="col-md-6">
+        <% if (pdfFilePath) { %>
+          <embed src="<%= pdfFilePath %>" type="application/pdf" width="100%" height="600px">
+        <% } else { %>
+          <p>No PDF file selected.</p>
+        <% } %>
+      </div>
+      
+      <!-- Right column for displaying editable JSON fields -->
+      <div class="col-md-6">
+        <form action="/submit" method="POST" id="jsonForm">
+          <% function renderJsonFields(json, parentKey = '') { %>
+            <% for (let key in json) { %>
+              <% if (key === 'filename') { %>
+                <div class="form-group">
+                  <label for="<%= parentKey + key %>"><%= key.charAt(0).toUpperCase() + key.slice(1) %></label>
+                  <input type="text" class="form-control" id="<%= parentKey + key %>" name="<%= parentKey + key %>" value="<%= json[key] %>" readonly>
+                </div>
+              <% } else if (Array.isArray(json[key]) && key === 'pay_lines') { %>
+                <h3>Pay Lines</h3>
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th>Worked</th>
+                      <th>Paid</th>
+                      <th>Rate</th>
+                      <th>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <% json[key].forEach((item, index) => { %>
+                      <tr>
+                        <td><%= item.Description %></td>
+                        <td><input type="text" class="form-control" name="pay_lines[<%= index %>].Worked" value="<%= item.Worked.replace(/^ +| +$/g, '') %>"></td>
+                        <td><input type="text" class="form-control" name="pay_lines[<%= index %>].Paid" value="<%= item.Paid.replace(/^ +| +$/g, '') %>"></td>
+                        <td><input type="text" class="form-control" name="pay_lines[<%= index %>].Rate" value="<%= item.Rate.replace(/^ +| +$/g, '') %>"></td>
+                        <td><input type="text" class="form-control" name="pay_lines[<%= index %>].Amount" value="<%= item.Amount.replace(/^ +| +$/g, '') %>"></td>
+                      </tr>
+                    <% }) %>
+                  </tbody>
+                </table>
+              <% } else if (typeof json[key] === 'object' && !Array.isArray(json[key])) { %>
+                <% let sectionTitle = key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') %>
+                <h3><%= sectionTitle %></h3>
+                <table class="table">
+                  <tbody>
+                    <% for (let subKey in json[key]) { %>
+                      <% let formattedKey = subKey.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') %>
+                      <tr>
+                        <td><%= formattedKey %></td>
+                        <td>
+                          <input type="text" class="form-control" id="<%= parentKey + key + '.' + subKey %>" name="<%= parentKey + key + '.' + subKey %>" value="<%= json[key][subKey] %>">
+                        </td>
+                      </tr>
+                    <% } %>
+                  </tbody>
+                </table>
+              <% } else { %>
+                <div class="form-group">
+                  <label for="<%= parentKey + key %>"><%= key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') %></label>
+                  <% if (['total_payments', 'total_deductions', 'net_pay'].includes(key)) { %>
+                    <input type="text" class="form-control orange-border" id="<%= parentKey + key %>" name="<%= parentKey + key %>" value="<%= json[key] %>" readonly>
+                  <% } else { %>
+                    <input type="text" class="form-control" id="<%= parentKey + key %>" name="<%= parentKey + key %>" value="<%= json[key] %>">
+                  <% } %>
+                </div>
+              <% } %>
+            <% } %>
+          <% } %>
+          <% renderJsonFields(jsonContent) %>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script>
+    // Pass the pdfFilePath from EJS to JavaScript
+    const pdfFilePath = '<%= pdfFilePath %>';
+
+    // Function to handle changes in this_period_summary fields
+    function handleSummaryFieldChange(summaryField, topLevelFieldId) {
+      const thisPeriodSummaryInput = document.getElementById(summaryField);
+      const topLevelInput = document.getElementById(topLevelFieldId);
+
+      thisPeriodSummaryInput.addEventListener('input', function() {
+        const newValue = thisPeriodSummaryInput.value;
+        topLevelInput.value = newValue;
+      });
+    }
+
+    // Call the function for total_payments
+    handleSummaryFieldChange('this_period_summary.total_payments', 'total_payments');
+
+    // Call the function for total_deductions
+    handleSummaryFieldChange('this_period_summary.total_deductions', 'total_deductions');
+
+    // Call the function for net_pay
+    handleSummaryFieldChange('this_period_summary.net_pay', 'net_pay');
+
+    // Function to handle moving focus to this_period_summary fields
+    function moveFocusToSummaryField(topLevelFieldId, summaryFieldId) {
+      const topLevelInput = document.getElementById(topLevelFieldId);
+      const summaryInput = document.getElementById(summaryFieldId);
+
+      topLevelInput.addEventListener('click', function() {
+        summaryInput.focus(); // Move focus to this_period_summary field
+        summaryInput.select(); // Select the content for easy editing
+      });
+    }
+
+    // Call the function for total_payments
+    moveFocusToSummaryField('total_payments', 'this_period_summary.total_payments');
+
+    // Call the function for total_deductions
+    moveFocusToSummaryField('total_deductions', 'this_period_summary.total_deductions');
+
+    // Call the function for net_pay
+    moveFocusToSummaryField('net_pay', 'this_period_summary.net_pay');
+
+    document.addEventListener('DOMContentLoaded', function() {
+      const deletePayslipBtn = document.getElementById('deletePayslipBtn');
+      const submitPayslipBtn = document.getElementById('submitPayslipBtn');
+      const downloadJSONBtn = document.getElementById('downloadJSONBtn');
+
+
+      submitPayslipBtn.addEventListener('click', submitFormData);
+      downloadJSONBtn.addEventListener('click', downloadJSON);
+
+      deletePayslipBtn.addEventListener('click', function() {
+        if (confirm('Are you sure you want to delete this payslip?')) {
+          fetch('/delete-payslip', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ filename: pdfFilePath }) // Replace with actual filename
+          })
+          .then(response => {
+            if (response.ok) {
+              alert('Payslip deleted successfully.');
+              window.location.href = '/view_pending_payslips'; // Redirect to view_pending_payslips after deletion
+            } else {
+              throw new Error('Failed to delete payslip.');
+            }
+          })
+          .catch(error => {
+            console.error('Error deleting payslip:', error);
+            alert('Failed to delete payslip. Please try again later.');
+          });
+        }
+      });
+    });
+
+    function packFormData() {
+      const formData = new FormData(document.getElementById('jsonForm'));
+      const packedData = {};
+
+      // Helper function to trim whitespace from both ends of a string
+      function trim(value) {
+        return value.trim();
+      }
+
+      // Iterate through each form field in formData
+      formData.forEach((value, key) => {
+        if (key.startsWith('pay_lines')) {
+          const match = key.match(/\[(\d+)\]\.(.*)/); // Regex to match pay_lines[index].Field
+          if (match) {
+            const index = match[1];
+            const field = match[2];
+
+            if (!packedData['pay_lines']) {
+              packedData['pay_lines'] = [];
+            }
+            if (!packedData['pay_lines'][index]) {
+              packedData['pay_lines'][index] = {};
+            }
+
+            // Handle Description field specifically
+            if (field === 'Description') {
+              // Skip assigning Description here because we will handle it separately
+              return;
+            }
+
+            // Assign other fields normally
+            packedData['pay_lines'][index][field] = trim(value);
+          }
+        } else if (key.startsWith('deduction_lines')) {
+          // Remove 'deduction_lines.' prefix
+          const mainField = key.replace('deduction_lines.', '');
+
+          // Assign directly to deduction_lines
+          packedData['deduction_lines'] = packedData['deduction_lines'] || {};
+          packedData['deduction_lines'][mainField] = trim(value);
+        } else {
+          // For other fields outside pay_lines and deduction_lines
+          const keys = key.split('.');
+          let currentObj = packedData;
+
+          for (let i = 0; i < keys.length; i++) {
+            const isLastKey = i === keys.length - 1;
+            const currentKey = keys[i];
+
+            if (isLastKey) {
+              currentObj[currentKey] = trim(value);
+            } else {
+              if (!currentObj[currentKey]) {
+                currentObj[currentKey] = isNaN(keys[i + 1]) ? {} : [];
+              }
+              currentObj = currentObj[currentKey];
+            }
+          }
+        }
+      });
+
+      // Handle extracting Description from table rows
+      const payLinesTableRows = document.querySelectorAll('#jsonForm table:nth-of-type(6) tbody tr'); // Adjust this selector if necessary
+
+      if (payLinesTableRows.length > 0) {
+        packedData['pay_lines'].forEach((payLine, index) => {
+          const description = payLinesTableRows[index].querySelector('td:first-of-type').textContent.trim();
+          payLine['Description'] = description;
+        });
+      }
+
+      return packedData;
+    }
+
+
+    function submitFormData() {
+      const formData = packFormData();
+      const url = '/submit-payslip'; // Replace with your actual server endpoint
+
+      // Assuming you want to use fetch for making the POST request
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        return response.json();
+      })
+      .then(data => {
+        // Handle successful response from server
+        console.log('Server response:', data);
+        // Optionally, perform actions based on the server response
+      })
+      .catch(error => {
+        // Handle network errors or server errors
+        console.error('Error submitting data:', error);
+        // Optionally, display an error message to the user
+      });
+    }
+
+
+    function downloadJSON() {
+      const formData = packFormData()
+      // Generate timestamp
+      const timestamp = new Date().toLocaleString('en-US', {
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }).replace(/[^\d]/g, '');
+
+      // Convert formData to JSON string
+      const jsonData = JSON.stringify(formData, null, 2);
+
+      // Create Blob object
+      const blob = new Blob([jsonData], { type: 'application/json' });
+
+      // Create a link element, set its href attribute, and simulate click
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `payslip_${timestamp}.json`;
+      link.click();
+
+      // Cleanup
+      URL.revokeObjectURL(link.href);
+    }
+
+
+
+
+  </script>
+
+
+</body>
+</html>

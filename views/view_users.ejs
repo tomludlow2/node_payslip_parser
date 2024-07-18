@@ -1,0 +1,59 @@
+<!-- view_users.ejs -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Management</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css">
+</head>
+<body>
+  <div class="container mt-5">
+    <h2>User Management</h2>
+    <table class="table table-striped mt-3">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Username</th>
+          <th>Email</th>
+          <th>User Category</th>
+          <th>Provider</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% users.forEach(user => { %>
+          <tr>
+            <td><%= user.id %></td>
+            <td><%= user.username %></td>
+            <td><%= user.email %></td>
+            <td>
+              <form action="/update_user_category" method="POST">
+                <input type="hidden" name="userId" value="<%= user.id %>">
+                <select name="userCategory" class="form-control" onchange="this.form.submit()">
+                  <option value="tier_1" <%= user.user_category === 'tier_1' ? 'selected' : '' %>>Tier 1</option>
+                  <option value="tier_2" <%= user.user_category === 'tier_2' ? 'selected' : '' %>>Tier 2</option>
+                  <option value="admin" <%= user.user_category === 'admin' ? 'selected' : '' %>>Admin</option>
+                </select>
+              </form>
+            </td>
+            <td><%= user.provider ? user.provider : 'Local' %></td>
+            <td>
+              <form action="/delete_user" method="POST">
+                <input type="hidden" name="userId" value="<%= user.id %>">
+                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+              </form>
+              <form action="/change_password" method="POST">
+                <input type="hidden" name="userId" value="<%= user.id %>">
+                <input type="text" name="newPassword" placeholder="New Password">
+                <button type="submit" class="btn btn-primary btn-sm">Change Password</button>
+              </form>
+            </td>
+          </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <a href="/">Back to Dashboard</a>
+  </div>
+</body>
+</html>

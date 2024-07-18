@@ -6,3 +6,8 @@ payslips/*
 package-lock.json
 package.json
 backup/*
+private/*
+exports/*
+generateHash.js
+tempFileDir/*
+

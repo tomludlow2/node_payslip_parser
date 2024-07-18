@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>View Pending Payslips</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <!-- Other head content -->
+</head>
+<body>
+
+<div class="container">
+  <h2 class="mb-4">Pending Payslips</h2>
+
+  <% if (messages.error && messages.error.length > 0) { %>
+    <div class="alert alert-danger">
+      <%= messages.error %>
+    </div>
+  <% } %>
+
+  <% if (messages.success && messages.success.length > 0) { %>
+    <div class="alert alert-success">
+      <%= messages.success %>
+    </div>
+  <% } %>
+
+  <table class="table">
+    <thead>
+      <tr>
+        <th scope="col">File Name</th>
+        <th scope="col">Created At</th>
+        <th scope="col">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% files.forEach(file => { %>
+        <tr>
+          <td><%= file.name %></td>
+          <td><%= formatDate(file.createdAt) %></td> <!-- Display formatted creation timestamp -->
+          <td>
+            <form action="/process_payslip" method="POST">
+              <input type="hidden" name="filename" value="<%= file.name %>">
+              <button type="submit" class="btn btn-primary">Process Payslip</button>
+            </form>
+          </td>
+        </tr>
+      <% }); %>
+    </tbody>
+  </table>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@uppy/core"></script>
+<script src="https://cdn.jsdelivr.net/npm/@uppy/drag-drop"></script>
+
+</body>
+</html>

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Upload Payslip</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <!-- Include Uppy CSS for styling -->
+  <link href="https://cdn.jsdelivr.net/npm/@uppy/core/dist/style.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@uppy/drag-drop/dist/style.min.css" rel="stylesheet">
+  <style>
+    .container {
+      max-width: 600px;
+      margin-top: 50px;
+    }
+    .dropzone {
+      border: 2px dashed #007bff;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+    }
+    .dropzone:hover {
+      background-color: #f0f0f0;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2 class="mb-4">Upload Payslip</h2>
+  
+  <% if (messages.error && messages.error.length > 0) { %>
+    <div class="alert alert-danger">
+      <%= messages.error %>
+    </div>
+  <% } %>
+  
+  <% if (messages.success && messages.success.length > 0) { %>
+    <div class="alert alert-success">
+      <%= messages.success %>
+    </div>
+  <% } %>
+  
+  <div class="card">
+    <div class="card-body">
+      <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+        <div class="dropzone" id="dropzone">
+          <p class="lead">Drag and drop your PDF file here or click to select.</p>
+          <input type="file" id="fileInput" name="uploadedFile" style="display: none;">
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Upload File</button>
+      </form>
+    </div>
+  </div>
+  
+</div>
+
+<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@uppy/core"></script>
+<script src="https://cdn.jsdelivr.net/npm/@uppy/drag-drop"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('dropzone').addEventListener('click', () => {
+      document.getElementById('fileInput').click();
+    });
+
+    const uppy = new Uppy.Core();
+    uppy.use(Uppy.DragDrop, {
+      target: '#dropzone',
+      inputName: 'uploadedFile',
+      allowMultipleFiles: false,
+    });
+  });
+</script>
+
+</body>
+</html>

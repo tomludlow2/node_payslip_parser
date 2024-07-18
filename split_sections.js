@@ -13,7 +13,7 @@ async function readPDF(file) {
   });
 }
 
-function process_loaded_payslip(pdfText, filename) {
+async function process_loaded_payslip(pdfText, filename) {
   let sections = splitSections(pdfText);
   //Section 1 contains demographics and tax
   let section_1_lines = parse_section_1(sections.section1);
