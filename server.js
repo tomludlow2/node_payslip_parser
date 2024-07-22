@@ -17,6 +17,8 @@ const fs = require('fs');
 const path = require('path');
 const { validate_pdf } = require('./validate_pdf'); // Import validate_pdf function
 const { process_loaded_payslip } = require('./split_sections');
+const { send_to_postgres } = require('./payslip_insert');
+
 
 const app = express();
 const port = 52535;
@@ -242,7 +244,8 @@ app.get('/dashboard', (req, res) => {
   if (!req.isAuthenticated()) {
     return res.redirect('/');
   }
-  res.render('dashboard', { user: req.user });
+  const messages = req.flash() || {};
+  res.render('dashboard', { user: req.user, messages:messages });
 });
 
 app.get('/logout', (req, res) => {
@@ -459,7 +462,8 @@ app.post('/process_payslip', ensureAuthenticated, async (req, res) => {
 
     // Render the approve_pending_payslip view with PDF and JSON content
     res.render('approve_pending_payslip', {
-      pdfFilePath: `/payslips/${req.user.username}/uploaded/${filename}`,
+      pdfFilePath: `${filename}`,
+      username: req.user.username,
       jsonContent: result,
       messages: { success: 'PDF processed successfully.' } // Flash message if needed
     });
@@ -479,6 +483,7 @@ app.get('/approve_pending_payslip', ensureAuthenticated, (req, res) => {
   });
 });
 
+
 // POST endpoint to delete a payslip file
 app.post('/delete-payslip', ensureAuthenticated, (req, res) => {
   const username = req.user.username; // Assuming you have user authentication
@@ -487,10 +492,11 @@ app.post('/delete-payslip', ensureAuthenticated, (req, res) => {
   if (!filename) {
     console.error('Error: filename is missing or undefined in request body');
     req.flash('error', 'Filename is required');
-    return res.status(400).send('Filename is required');
+    return res.status(400).redirect('/view_pending_payslips'); // Redirect to view_pending_payslips with error message
   }
 
-  const payslipDirectory = path.join(__dirname, '');
+  // Correct directory path for uploaded payslips
+  const payslipDirectory = path.join(__dirname, 'payslips', username, 'uploaded');
   const filePath = path.join(payslipDirectory, filename);
 
   fs.unlink(filePath, (err) => {
@@ -504,18 +510,115 @@ app.post('/delete-payslip', ensureAuthenticated, (req, res) => {
   });
 });
 
+
 // POST endpoint to submit a payslip
-app.post('/submit-payslip', ensureAuthenticated, (req, res) => {
-  const username = req.user.username; // Assuming you have user authentication
-  const formData = req.body; // Assuming formData is sent in the request body
+app.post('/submit-payslip', ensureAuthenticated, async (req, res) => {
+  const username = req.user.username; // Assuming user authentication middleware sets req.user
+  const formData = req.body; // Form data sent in the request body
+  const isDuplicateConfirmed = formData.isDuplicateConfirmed === 'true'; // Convert to boolean
+
+  // Remove isDuplicateConfirmed from formData
+  const { isDuplicateConfirmed: _, ...filteredFormData } = formData;
 
   // Example console log to output formData
-  console.log('Received payslip data:');
-  console.log(formData);
+  console.log('Received payslip data for user:', username);
+  console.log(filteredFormData);
 
-  // Example response
-  res.status(200).send('Payslip submitted successfully.'); // Send a success response
+  try {
+    // Call the send_to_postgres function
+    const result = await send_to_postgres(username, filteredFormData, isDuplicateConfirmed);
+
+    // Ensure result is an object with status and message
+    if (typeof result !== 'object' || result === null || !result.status || !result.message) {
+      throw new Error('Unexpected result format');
+    }
+
+    if (result.status === 'duplicate') {
+      req.flash('info', result.message);
+      res.status(409).json({ message: result.message, status: 'duplicate', isDuplicate: true });
+    } else if (result.status === 'success') {
+      // Perform any additional processing like moving files
+      if (formData.filename) {
+        await tidy_up_submission(username, formData.filename);
+      }
+      req.flash('success', result.message);
+      res.status(200).json({ message: result.message, status: 'success' });
+    } else {
+      throw new Error('Unexpected status received from database operation');
+    }
+  } catch (error) {
+    console.error('Error submitting payslip:', error.message);
+    req.flash('error', 'Failed to submit payslip.');
+    res.status(500).json({ message: 'Failed to submit payslip.', status: 'error' });
+  }
 });
+
+
+// Route to render the duplicate confirmation page
+app.get('/confirm-duplicate', ensureAuthenticated, (req, res) => {
+  const formData = req.query; // Retrieve form data from query parameters
+
+  res.render('confirm_duplicate', { 
+    messages: req.flash('info'),
+    formData: formData
+  });
+});
+
+// POST endpoint to handle duplicate confirmation
+app.post('/submit-duplicate', ensureAuthenticated, async (req, res) => {
+  const username = req.user.username;
+  const formData = req.body;
+
+  try {
+    // Call send_to_postgres with isDuplicateConfirmed set to true
+    const result = await send_to_postgres(username, formData, true);
+
+    if (result.status === 'success') {
+      await tidy_up_submission(username, formData.filename);
+      req.flash('success', result.message);
+      res.redirect('/dashboard');
+    } else {
+      req.flash('error', 'Failed to submit payslip.');
+      res.redirect('/dashboard');
+    }
+  } catch (error) {
+    console.error('Error submitting payslip:', error.message);
+    req.flash('error', 'Failed to submit payslip.');
+    res.redirect('/dashboard');
+  }
+});
+
+
+
+// Function to move the file and ensure directories are created
+async function tidy_up_submission(username, filename) {
+  const uploadedDir = path.join(__dirname, 'payslips', username, 'uploaded');
+  const processedDir = path.join(__dirname, 'payslips', username, 'processed');
+  
+  // Define source and destination paths
+  const sourcePath = path.join(uploadedDir, filename);
+  const destinationPath = path.join(processedDir, filename);
+  
+  // Ensure directories exist
+  if (!fs.existsSync(uploadedDir)) {
+    fs.mkdirSync(uploadedDir, { recursive: true });
+  }
+  if (!fs.existsSync(processedDir)) {
+    fs.mkdirSync(processedDir, { recursive: true });
+  }
+  
+  // Move the file from uploaded to processed
+  return new Promise((resolve, reject) => {
+    fs.rename(sourcePath, destinationPath, (err) => {
+      if (err) {
+        reject(new Error(`Failed to move file: ${err.message}`));
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
 
 
 app.listen(port, () => {

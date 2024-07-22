@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirm Duplicate</title>
+  <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+  <div class="container mt-4">
+    <h2>Confirm Payslip Submission</h2>
+    
+    <% if (messages.length > 0) { %>
+      <% messages.forEach(function(message) { %>
+        <div class="alert alert-info">
+          <%= message %>
+        </div>
+      <% }) %>
+    <% } %>
+
+    <form id="confirmForm" action="/submit-duplicate" method="post">
+      <% for (const key in formData) { %>
+        <input type="hidden" name="<%= key %>" value="<%= formData[key] %>">
+      <% } %>
+      <input type="hidden" name="isDuplicateConfirmed" value="true">
+      <button type="submit" class="btn btn-primary">Confirm Override</button>
+      <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+    </form>
+
+    <!-- Delete Button -->
+    <button id="deletePayslipBtn" class="btn btn-danger mt-3">Delete Payslip</button>
+  </div>
+
+  <!-- Include jQuery before using it for event handling -->
+  <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"></script>
+  <!-- Include Bootstrap JS -->
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"></script>
+
+  <!-- JavaScript for handling delete functionality -->
+  <script>
+    document.getElementById('deletePayslipBtn').addEventListener('click', function() {
+      const pdfFilePath = '<%= formData.filename %>'; // Assuming filename is part of formData
+
+      if (confirm('Are you sure you want to delete this payslip?')) {
+        fetch('/delete-payslip', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ filename: pdfFilePath }) // Send the filename to the server
+        })
+        .then(response => {
+          if (response.ok) {
+            window.location.href = '/view_pending_payslips'; // Redirect to view_pending_payslips
+          } else {
+            throw new Error('Failed to delete payslip.');
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting payslip:', error);
+          alert('Failed to delete payslip. Please try again later.');
+        });
+      }
+    });
+  </script>
+</body>
+</html>

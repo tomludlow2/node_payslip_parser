@@ -74,14 +74,17 @@ async function send_to_postgres(username, payslipData, override = false) {
 
       if (result.rowCount === 0) {
         console.log(`Payslip data for ${username} already exists and was not inserted.`);
+        return { status: 'duplicate', message: `That payslip for ${username} already exists and wasn't automatically inserted, please confirm if you would like to override it.` }
+
       } else {
         console.log(`Inserted/Updated payslip data for ${username}: ${result.rowCount} rows affected`);
+        return { status: 'success', message: 'Success, the payslip was stored successfully'}
       }
 
 
     } catch (error) {
       console.error('Error executing query:', error.message);
-      throw error; // Rethrow the error to propagate it upwards
+      throw new Error('Database error');
     }
 
   } catch (error) {
@@ -94,4 +97,4 @@ async function send_to_postgres(username, payslipData, override = false) {
   }
 }
 
-module.exports = send_to_postgres;
+module.exports = {send_to_postgres};

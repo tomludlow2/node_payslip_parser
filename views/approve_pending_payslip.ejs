@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Viewer</title>
+  <title>Approve Pending Payslip</title>
   <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"> <!-- Font Awesome for icons -->
   <style>
     body, html {
       margin: 0;
@@ -50,6 +51,33 @@
   </style>
 </head>
 <body>
+
+  <!-- Navigation Bar -->
+  <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+    <a class="navbar-brand" href="/dashboard">Dashboard</a>
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav">
+        <li class="nav-item">
+          <a class="nav-link" href="/upload">Upload Payslip</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/view_pending_payslips">View Pending Payslips</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/view_users">View Users</a>
+        </li>
+      </ul>
+      <ul class="navbar-nav ml-auto">
+        <li class="nav-item">
+          <a class="nav-link btn btn-danger text-white" href="/logout">Logout</a>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
   <div class="container">
     <div class="buttons-container mb-4">
       <h2 class="mb-0">Approve Pending Payslip</h2>
@@ -76,7 +104,7 @@
       <!-- Left column for displaying the PDF file -->
       <div class="col-md-6">
         <% if (pdfFilePath) { %>
-          <embed src="<%= pdfFilePath %>" type="application/pdf" width="100%" height="600px">
+          <embed src="/payslips/<%= username %>/uploaded/<%= pdfFilePath %>" type="application/pdf" width="100%" height="600px">
         <% } else { %>
           <p>No PDF file selected.</p>
         <% } %>
@@ -151,6 +179,8 @@
   </div>
 
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
   <script>
     // Pass the pdfFilePath from EJS to JavaScript
     const pdfFilePath = '<%= pdfFilePath %>';
@@ -200,8 +230,7 @@
       const submitPayslipBtn = document.getElementById('submitPayslipBtn');
       const downloadJSONBtn = document.getElementById('downloadJSONBtn');
 
-
-      submitPayslipBtn.addEventListener('click', submitFormData);
+      submitPayslipBtn.addEventListener('click', () => submitFormData(false));
       downloadJSONBtn.addEventListener('click', downloadJSON);
 
       deletePayslipBtn.addEventListener('click', function() {
@@ -215,7 +244,7 @@
           })
           .then(response => {
             if (response.ok) {
-              alert('Payslip deleted successfully.');
+              //alert('Payslip deleted successfully.');
               window.location.href = '/view_pending_payslips'; // Redirect to view_pending_payslips after deletion
             } else {
               throw new Error('Failed to delete payslip.');
@@ -303,40 +332,50 @@
       return packedData;
     }
 
-
-    function submitFormData() {
+    function submitFormData(isDuplicateConfirmed = false) {
       const formData = packFormData();
       const url = '/submit-payslip'; // Replace with your actual server endpoint
 
-      // Assuming you want to use fetch for making the POST request
       fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, isDuplicateConfirmed }), // Include the duplicate confirmation flag
       })
       .then(response => {
-        if (!response.ok) {
+        if (response.status === 409) {
+          // Redirect to the confirmation page with query string
+          return response.json().then(data => {
+            if (data.isDuplicate) {
+              const queryString = new URLSearchParams(formData).toString();
+              window.location.href = `/confirm-duplicate?${queryString}`;
+            }
+          });
+        } else if (!response.ok) {
           throw new Error('Network response was not ok');
+        } else {
+          // Handle successful response from server
+          return response.json().then(data => {
+            if (data.status === 'success') {
+              console.log('Server response:', data);
+              window.location.href = '/dashboard';
+            } else {
+              // Handle unexpected server response
+              console.error('Unexpected server response:', data);
+            }
+          });
         }
-        return response.json();
-      })
-      .then(data => {
-        // Handle successful response from server
-        console.log('Server response:', data);
-        // Optionally, perform actions based on the server response
       })
       .catch(error => {
         // Handle network errors or server errors
         console.error('Error submitting data:', error);
-        // Optionally, display an error message to the user
+        alert('Error submitting data: ' + error.message);
       });
     }
 
-
     function downloadJSON() {
-      const formData = packFormData()
+      const formData = packFormData();
       // Generate timestamp
       const timestamp = new Date().toLocaleString('en-US', {
         hour12: false,
@@ -363,12 +402,6 @@
       // Cleanup
       URL.revokeObjectURL(link.href);
     }
-
-
-
-
   </script>
-
-
 </body>
 </html>

@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Upload Payslip</title>
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-  <!-- Include Uppy CSS for styling -->
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/@uppy/core/dist/style.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/@uppy/drag-drop/dist/style.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/path/to/your/custom.css"> <!-- Link to custom CSS if needed -->
   <style>
     .container {
       max-width: 600px;
@@ -18,60 +18,172 @@
       padding: 20px;
       text-align: center;
       cursor: pointer;
+      position: relative;
+      width: 100%;
+      height: 200px;
+      overflow: hidden;
+      background-color: #f8f9fa;
     }
     .dropzone:hover {
-      background-color: #f0f0f0;
+      background-color: #e9ecef;
+    }
+    .dropzone i {
+      font-size: 3rem;
+      color: #007bff;
+      margin-bottom: 10px;
+    }
+    .dropzone .filename {
+      font-size: 1.2rem;
+      color: #333;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    .dropzone .clear-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #ff4d4d;
+      border: none;
+      color: white;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      text-align: center;
+      line-height: 24px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .dropzone .clear-btn:hover {
+      background: #cc0000;
     }
   </style>
 </head>
 <body>
+  <!-- Navigation Bar -->
+  <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+    <a class="navbar-brand" href="/dashboard">Dashboard</a>
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav">
+        <li class="nav-item">
+          <a class="nav-link" href="/upload">Upload Payslip</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/view_pending_payslips">View Pending Payslips</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/view_users">View Users</a>
+        </li>
+      </ul>
+      <ul class="navbar-nav ml-auto">
+        <li class="nav-item">
+          <a class="nav-link btn btn-danger text-white" href="/logout">Logout</a>
+        </li>
+      </ul>
+    </div>
+  </nav>
 
-<div class="container">
-  <h2 class="mb-4">Upload Payslip</h2>
-  
-  <% if (messages.error && messages.error.length > 0) { %>
-    <div class="alert alert-danger">
-      <%= messages.error %>
-    </div>
-  <% } %>
-  
-  <% if (messages.success && messages.success.length > 0) { %>
-    <div class="alert alert-success">
-      <%= messages.success %>
-    </div>
-  <% } %>
-  
-  <div class="card">
-    <div class="card-body">
-      <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
-        <div class="dropzone" id="dropzone">
-          <p class="lead">Drag and drop your PDF file here or click to select.</p>
-          <input type="file" id="fileInput" name="uploadedFile" style="display: none;">
-        </div>
-        <button type="submit" class="btn btn-primary mt-3">Upload File</button>
-      </form>
+  <div class="container">
+    <h2 class="mb-4">Upload Payslip</h2>
+
+    <% if (messages.error && messages.error.length > 0) { %>
+      <div class="alert alert-danger">
+        <%= messages.error %>
+      </div>
+    <% } %>
+
+    <% if (messages.success && messages.success.length > 0) { %>
+      <div class="alert alert-success">
+        <%= messages.success %>
+      </div>
+    <% } %>
+
+    <div class="card">
+      <div class="card-body">
+        <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+          <div class="dropzone" id="dropzone">
+            <i class="fas fa-cloud-upload-alt"></i>
+            <div class="filename" id="fileName">Drag and drop your PDF file here or click to select.</div>
+            <button class="clear-btn" id="clearBtn">&times;</button>
+            <input type="file" id="fileInput" name="uploadedFile" style="display: none;">
+          </div>
+          <input type="hidden" name="filename" id="hiddenFilename">
+          <button type="submit" class="btn btn-primary mt-3">Upload File</button>
+        </form>
+      </div>
     </div>
   </div>
-  
-</div>
 
-<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@uppy/core"></script>
-<script src="https://cdn.jsdelivr.net/npm/@uppy/drag-drop"></script>
-<script>
-  document.addEventListener('DOMContentLoaded', function () {
-    document.getElementById('dropzone').addEventListener('click', () => {
-      document.getElementById('fileInput').click();
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@uppy/core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@uppy/drag-drop"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const dropzone = document.getElementById('dropzone');
+      const fileInput = document.getElementById('fileInput');
+      const fileNameDisplay = document.getElementById('fileName');
+      const clearBtn = document.getElementById('clearBtn');
+      const hiddenFilename = document.getElementById('hiddenFilename');
+
+      dropzone.addEventListener('click', () => {
+        fileInput.click();
+      });
+
+      fileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+          fileNameDisplay.textContent = file.name;
+          hiddenFilename.value = file.name;
+          dropzone.querySelector('i').classList.remove('fa-cloud-upload-alt');
+          dropzone.querySelector('i').classList.add('fa-file');
+        } else {
+          fileNameDisplay.textContent = 'Drag and drop your PDF file here or click to select.';
+          dropzone.querySelector('i').classList.add('fa-cloud-upload-alt');
+          dropzone.querySelector('i').classList.remove('fa-file');
+        }
+      });
+
+      clearBtn.addEventListener('click', () => {
+        fileInput.value = '';
+        fileNameDisplay.textContent = 'Drag and drop your PDF file here or click to select.';
+        hiddenFilename.value = '';
+        dropzone.querySelector('i').classList.add('fa-cloud-upload-alt');
+        dropzone.querySelector('i').classList.remove('fa-file');
+      });
+
+      dropzone.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        dropzone.classList.add('drag-over');
+      });
+
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('drag-over');
+      });
+
+      dropzone.addEventListener('drop', (event) => {
+        event.preventDefault();
+        dropzone.classList.remove('drag-over');
+        const file = event.dataTransfer.files[0];
+        if (file) {
+          fileInput.files = event.dataTransfer.files;
+          fileNameDisplay.textContent = file.name;
+          hiddenFilename.value = file.name;
+          dropzone.querySelector('i').classList.remove('fa-cloud-upload-alt');
+          dropzone.querySelector('i').classList.add('fa-file');
+        }
+      });
+
+      const uppy = Uppy.Core();
+      uppy.use(Uppy.DragDrop, {
+        target: '#dropzone',
+        inputName: 'uploadedFile',
+        allowMultipleFiles: false,
+      });
     });
-
-    const uppy = new Uppy.Core();
-    uppy.use(Uppy.DragDrop, {
-      target: '#dropzone',
-      inputName: 'uploadedFile',
-      allowMultipleFiles: false,
-    });
-  });
-</script>
-
+  </script>
 </body>
 </html>

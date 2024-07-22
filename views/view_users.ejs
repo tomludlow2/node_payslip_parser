@@ -1,13 +1,42 @@
-<!-- view_users.ejs -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>User Management</title>
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"> <!-- Font Awesome for icons -->
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="/path/to/your/custom.css"> <!-- Adjust path as needed -->
 </head>
 <body>
+
+  <!-- Navigation Bar -->
+  <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+    <a class="navbar-brand" href="/dashboard">Dashboard</a>
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav">
+        <li class="nav-item">
+          <a class="nav-link" href="/upload">Upload Payslip</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/view_pending_payslips">View Pending Payslips</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/view_users">View Users</a>
+        </li>
+      </ul>
+      <ul class="navbar-nav ml-auto">
+        <li class="nav-item">
+          <a class="nav-link btn btn-danger text-white" href="/logout">Logout</a>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
   <div class="container mt-5">
     <h2>User Management</h2>
     <table class="table table-striped mt-3">
@@ -39,21 +68,25 @@
             </td>
             <td><%= user.provider ? user.provider : 'Local' %></td>
             <td>
-              <form action="/delete_user" method="POST">
+              <form action="/delete_user" method="POST" style="display:inline-block;">
                 <input type="hidden" name="userId" value="<%= user.id %>">
                 <button type="submit" class="btn btn-danger btn-sm">Delete</button>
               </form>
-              <form action="/change_password" method="POST">
+              <form action="/change_password" method="POST" style="display:inline-block; margin-left: 10px;">
                 <input type="hidden" name="userId" value="<%= user.id %>">
-                <input type="text" name="newPassword" placeholder="New Password">
-                <button type="submit" class="btn btn-primary btn-sm">Change Password</button>
+                <input type="password" name="newPassword" class="form-control form-control-sm" placeholder="New Password" required>
+                <button type="submit" class="btn btn-primary btn-sm mt-2">Change Password</button>
               </form>
             </td>
           </tr>
         <% }); %>
       </tbody>
     </table>
-    <a href="/">Back to Dashboard</a>
+    <a href="/" class="btn btn-secondary mt-3">Back to Dashboard</a>
   </div>
+
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 </body>
 </html>
