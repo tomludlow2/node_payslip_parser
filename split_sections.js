@@ -205,27 +205,132 @@ function split_pay_deductions(section2) {
   };
 }
 
+function areApproximatelyEqual(a, b, tolerance = 0.01) {
+    return Math.abs(a - b) < tolerance;
+}
 
-function parse_pay_lines(pay_lines) {
+function findCombinations(numbers, target) {
+    const results = [];
+
+    function backtrack(startIndex, currentCombination, currentSum) {
+        if (currentSum > target + 0.01) return; // Adding tolerance
+        if (areApproximatelyEqual(currentSum, target)) {
+            results.push([...currentCombination]);
+            return;
+        }
+
+        for (let i = startIndex; i < numbers.length; i++) {
+            currentCombination.push(numbers[i]);
+            backtrack(i + 1, currentCombination, currentSum + numbers[i]);
+            currentCombination.pop();
+        }
+    }
+
+    backtrack(0, [], 0);
+    return results;
+}
+
+function parse_pay_lines(pay_lines, total_pay = 0) {
   const payLinesArray = [];
-  const n = pay_lines.length / 5; // Number of unique objects
+  
+  if (pay_lines.length % 5 === 0) {
+    const n = pay_lines.length / 5; // Number of unique objects
 
-  // Create objects for each set of n lines
-  for (let i = 0; i < n; i++) {
-    const payLine = {
-      Description: pay_lines[i] ? pay_lines[i].trim() : '', // Description is always present
-      Worked: pay_lines[i + n] ? pay_lines[i + n].trim() : '',
-      Paid: pay_lines[i + 2 * n] ? pay_lines[i + 2 * n].trim() : '',
-      Rate: pay_lines[i + 3 * n] ? pay_lines[i + 3 * n].trim() : '',
-      Amount: pay_lines[i + 4 * n] ? pay_lines[i + 4 * n].trim() : ''
-    };
+    // Create objects for each set of n lines
+    for (let i = 0; i < n; i++) {
+      const payLine = {
+        Description: pay_lines[i] ? pay_lines[i].trim() : '', // Description is always present
+        Worked: pay_lines[i + n] ? pay_lines[i + n].trim() : '',
+        Paid: pay_lines[i + 2 * n] ? pay_lines[i + 2 * n].trim() : '',
+        Rate: pay_lines[i + 3 * n] ? pay_lines[i + 3 * n].trim() : '',
+        Amount: pay_lines[i + 4 * n] ? pay_lines[i + 4 * n].trim() : ''
+      };
 
-    // Add the pay line object to the array
-    payLinesArray.push(payLine);
+      // Add the pay line object to the array
+      payLinesArray.push(payLine);
+    }
+
+    // Validation
+    payLinesArray.forEach(payLine => {
+      if (!isNaN(payLine.Paid) && !isNaN(payLine.Rate)) {
+        const calculatedAmount = (parseFloat(payLine.Paid) * parseFloat(payLine.Rate)).toFixed(2);
+        const actualAmount = parseFloat(payLine.Amount).toFixed(2);
+        if (Math.abs(calculatedAmount - actualAmount) > 0.1) {
+          console.error(`Validation error: ${payLine.Description} calculated amount ${calculatedAmount} does not match actual amount ${actualAmount}`);
+        }
+      } else {
+        if (isNaN(payLine.Worked)) payLine.Worked = '';
+        if (isNaN(payLine.Paid)) payLine.Paid = '';
+        if (isNaN(payLine.Rate)) payLine.Rate = '';
+      }
+    });
+
+  } else {
+    console.log(total_pay, typeof(total_pay));
+    if (typeof total_pay !== 'number' || isNaN(total_pay)) {
+      console.warn('Total pay is not provided or is not a valid number');
+    } else {
+      const descriptions = pay_lines.filter(line => isNaN(line.trim()));
+      const numbers = pay_lines.filter(line => !isNaN(line.trim())).map(num => parseFloat(num));
+
+      console.log("Checking Valid Combinations");
+      const validCombinations = findCombinations(numbers, total_pay);
+      console.log("Valid combinations", validCombinations);
+
+      if (validCombinations.length === 0) {
+        console.error('No valid combinations of numbers add up to total pay');
+      } else {
+        const validNumbers = validCombinations[0];
+        const remainingNumbers = numbers.filter(num => !validNumbers.includes(num));
+
+        console.log("Numbers after removing valid amounts:", remainingNumbers);
+
+        // Group remaining numbers based on their type
+        const numGroups = remainingNumbers.length / 3;
+        if (numGroups % 1 === 0) {  // Check if numGroups is an integer
+          const groupedNumbers = [];
+          for (let i = 0; i < numGroups; i++) {
+            groupedNumbers.push([]);
+          }
+
+          for (let i = 0; i < remainingNumbers.length; i++) {
+            const groupIndex = i % numGroups;
+            groupedNumbers[groupIndex].push(remainingNumbers[i]);
+          }
+
+          console.log("Grouped numbers:", groupedNumbers);
+
+          // Assign Worked, Paid, Rate based on grouped numbers
+          groupedNumbers.forEach((group, index) => {
+            if (group.length === 3) {
+              const [worked, paid, rate] = group;
+              const amount = (parseFloat(rate) * parseFloat(paid)).toFixed(2);
+
+              // Find a pay line that needs to be updated
+              for (const payLine of payLinesArray) {
+                if (!payLine.Amount && payLine.Description === descriptions[index]) {
+                  payLine.Worked = worked ? worked.toFixed(2) : '';
+                  payLine.Paid = paid ? paid.toFixed(2) : '';
+                  payLine.Rate = rate ? rate.toFixed(2) : '';
+                  payLine.Amount = amount;
+                  break;
+                }
+              }
+            }
+          });
+        } else {
+          console.warn('Remaining numbers cannot be evenly grouped into sets of 3');
+        }
+      }
+    }
   }
 
   return payLinesArray;
 }
+
+
+
+
 
 
 function parse_section_3(section3) {

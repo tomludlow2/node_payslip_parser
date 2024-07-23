@@ -54,11 +54,37 @@
     <h1>Welcome to Your Dashboard</h1>
     <p>Here you can manage payslips, view pending payslips, view users, and more.</p>
 
-    <!-- Additional content goes here -->
+    <!-- View an Individual Payslip -->
+    <div class="mt-5">
+      <h2>View an Individual Payslip</h2>
+      <form id="viewPayslipForm" action="/view_payslip" method="POST">
+        <div class="form-group">
+          <label for="payslipSelect">Select Payslip</label>
+          <select id="payslipSelect" name="payslip_id" class="form-control" required>
+            <option value="">Select a payslip...</option>
+            <% payslips.forEach(payslip => { %>
+              <option value="<%= payslip.payslip_id %>"><%= payslip.filename %> - <%= formatDate(payslip.pay_date) %></option>
+            <% }); %>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary">View Payslip</button>
+      </form>
+    </div>
   </div>
 
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.10.2/dist/umd/popper.min.js"></script>
   <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+  
+  <!-- JavaScript to Format Date -->
+  <script>
+    function formatDate(dateStr) {
+      const date = new Date(dateStr);
+      const dd = String(date.getDate()).padStart(2, '0');
+      const mm = String(date.getMonth() + 1).padStart(2, '0'); // January is 0!
+      const yyyy = date.getFullYear();
+      return `${dd}-${mm}-${yyyy}`;
+    }
+  </script>
 </body>
 </html>

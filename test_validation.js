@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { validate_pdf } = require('./validate_pdf');
 
-const directoryPath = './payslips';
+const directoryPath = './payslips/tommludgmailcom/processed';
 
 console.log("Testing validation of all pdf files in payslips directory");
 

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>View Payslip</title>
+  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .container {
+      padding: 20px;
+    }
+    .card {
+      background-color: #f8f9fa; /* Slight background color */
+    }
+    .highlight-net-pay {
+      color: green;
+    }
+    .highlight-total-pay {
+      color: blue;
+    }
+    .highlight-total-deductions {
+      color: red;
+    }
+    .badge {
+      font-size: 1.25rem; /* Larger badges */
+      padding: 0.5rem 1rem;
+    }
+    .tooltip-text {
+      cursor: pointer;
+    }
+    .tooltip-content {
+      display: none;
+      position: absolute;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      padding: 5px;
+      z-index: 1000;
+    }
+    .summary-table td,
+    .summary-table th {
+      text-align: center;
+      padding: 0.5rem;
+    }
+    .tight-table td,
+    .tight-table th {
+      padding: 0.25rem; /* Tight padding for a compact look */
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="navbar navbar-expand-lg navbar-light bg-light">
+    <a class="navbar-brand" href="#">Dashboard</a>
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav">
+        <li class="nav-item">
+          <a class="nav-link" href="/upload">Upload Payslip</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/view_pending_payslips">View Pending Payslips</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/view_users">View Users</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/logout">Logout</a>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h2>View Payslip</h2>
+
+    <% if (messages.error && messages.error.length > 0) { %>
+      <div class="alert alert-danger">
+        <%= messages.error %>
+      </div>
+    <% } %>
+
+    <% if (messages.success && messages.success.length > 0) { %>
+      <div class="alert alert-success">
+        <%= messages.success %>
+      </div>
+    <% } %>
+
+    <!-- Cards for Demographics, Job Information, and Wage Information -->
+    <div class="row mb-4">
+      <div class="col-md-4">
+        <div class="card">
+          <div class="card-body">
+            <h4>Demographics</h4>
+            <p><strong>Name:</strong> <%= payslip.demographics.name %></p>
+            <p><strong>Location:</strong> <%= payslip.demographics.location %></p>
+            <p><strong>Assignment No:</strong> <%= payslip.demographics.assignment_no %></p>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card">
+          <div class="card-body">
+            <h4>Job Information</h4>
+            <p><strong>Job Title:</strong> <%= payslip.job.job_title %></p>
+            <p><strong>Department:</strong> <%= payslip.job.department %></p>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card">
+          <div class="card-body">
+            <h4>Wage Information</h4>
+            <p><strong>Salary:</strong> £<%= payslip.wage.salary %></p>
+            <p><strong>Standard Hours:</strong> <%= payslip.wage.standard_hours %></p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pay and Deductions Header -->
+    <h3>Pay and Deductions</h3>
+
+    <!-- Pay and Deduction Lines -->
+    <div class="row mb-4">
+      <div class="col-md-6">
+        <h4>Pay Lines</h4>
+        <table class="table table-bordered tight-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% payslip.pay_lines.forEach(line => { %>
+              <tr>
+                <td><span class="tooltip-text" data-key="<%= line.Description %>"><%= line.Description %></span></td>
+                <td>£<%= parseFloat(line.Amount).toFixed(2) %></td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+      <div class="col-md-6">
+        <h4>Deduction Lines</h4>
+        <table class="table table-bordered tight-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% Object.entries(payslip.deduction_lines).forEach(([desc, amt]) => { %>
+              <tr>
+                <td><span class="tooltip-text" data-key="<%= desc %>"><%= desc %></span></td>
+                <td>£<%= parseFloat(amt).toFixed(2) %></td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="summary mb-4">
+      <h4>Summary</h4>
+      <table class="table summary-table table-bordered">
+        <tbody>
+          <tr>
+            <th>Net Pay</th>
+            <td><span class="badge badge-success">£<%= payslip.net_pay %></span></td>
+          </tr>
+          <tr>
+            <th>Total Payments</th>
+            <td><span class="badge badge-primary">£<%= payslip.total_payments %></span></td>
+          </tr>
+          <tr>
+            <th>Total Deductions</th>
+            <td><span class="badge badge-danger">£<%= payslip.total_deductions %></span></td>
+          </tr>
+          <tr>
+            <th>Pay Date</th>
+            <td><%= formatDate(payslip.pay_date) %></td>
+          </tr>
+          <tr>
+            <th>Period End Date</th>
+            <td><%= payslip.this_period_summary.period_end_date %></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Year to Date and This Period Summary Tables -->
+    <div class="row mb-4">
+      <div class="col-md-6">
+        <h4>Year to Date</h4>
+        <table class="table table-bordered tight-table">
+          <tbody>
+            <tr>
+              <th>NI Pay</th>
+              <td>£<%= payslip.year_to_date.ni_pay %></td>
+            </tr>
+            <tr>
+              <th>Tax Paid</th>
+              <td>£<%= payslip.year_to_date.tax_paid %></td>
+            </tr>
+            <tr>
+              <th>Gross Pay</th>
+              <td>£<%= payslip.year_to_date.gross_pay %></td>
+            </tr>
+            <tr>
+              <th>Taxable Pay</th>
+              <td>£<%= payslip.year_to_date.taxable_pay %></td>
+            </tr>
+            <tr>
+              <th>Other NI Pay</th>
+              <td>£<%= payslip.year_to_date.other_ni_pay %></td>
+            </tr>
+            <tr>
+              <th>NI Contributions</th>
+              <td>£<%= payslip.year_to_date.ni_contributions %></td>
+            </tr>
+            <tr>
+              <th>Pension Contributions</th>
+              <td>£<%= payslip.year_to_date.pension_contributions %></td>
+            </tr>
+            <tr>
+              <th>Other NI Contributions</th>
+              <td>£<%= payslip.year_to_date.other_ni_contributions %></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="col-md-6">
+        <h4>This Period Summary</h4>
+        <table class="table table-bordered tight-table">
+          <tbody>
+            <tr>
+              <th>Net Pay</th>
+              <td>£<%= payslip.this_period_summary.net_pay %></td>
+            </tr>
+            <tr>
+              <th>Total Payments</th>
+              <td>£<%= payslip.this_period_summary.total_payments %></td>
+            </tr>
+            <tr>
+              <th>Total Deductions</th>
+              <td>£<%= payslip.this_period_summary.total_deductions %></td>
+            </tr>
+            <tr>
+              <th>Period Taxable Pay</th>
+              <td>£<%= payslip.this_period_summary.period_taxable_pay %></td>
+            </tr>
+            <tr>
+              <th>Period Pensionable Pay</th>
+              <td>£<%= payslip.this_period_summary.period_pensionable_pay %></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript to fetch tooltips from key_dict.json -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      fetch('/data_functions/key_dict.json')
+        .then(response => response.json())
+        .then(data => {
+          const tooltips = document.querySelectorAll('.tooltip-text');
+          tooltips.forEach(tooltip => {
+            const key = tooltip.getAttribute('data-key');
+            const tooltipContent = data[key] || 'No description available';
+            tooltip.setAttribute('title', tooltipContent);
+          });
+        });
+    });
+
+    function formatDate(dateStr) {
+      const date = new Date(dateStr);
+      const options = { day: '2-digit', month: 'long', year: '2-digit' };
+      return date.toLocaleDateString('en-GB', options);
+    }
+  </script>
+
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.10.2/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

@@ -18,7 +18,8 @@ const path = require('path');
 const { validate_pdf } = require('./validate_pdf'); // Import validate_pdf function
 const { process_loaded_payslip } = require('./split_sections');
 const { send_to_postgres } = require('./payslip_insert');
-
+const { list_users_payslips} = require('./data_functions/list_users_payslips');
+const { load_single_payslip} = require('./data_functions/load_single_payslip');
 
 const app = express();
 const port = 52535;
@@ -102,6 +103,8 @@ const formatDate = (timestamp) => {
   return formattedDate;
 };
 
+
+
 // Middleware to make formatDate available to all EJS templates
 app.use((req, res, next) => {
   res.locals.formatDate = formatDate;
@@ -174,6 +177,11 @@ app.get('/', (req, res) => {
   res.render('index', { message: req.flash('error') });
 });
 
+// Route to serve the key_dict.json file
+app.get('/data_functions/key_dict.json', (req, res) => {
+  res.sendFile(path.join(__dirname, 'data_functions', 'key_dict.json'));
+});
+
 // Serve payslip files dynamically based on logged-in user
 app.use('/payslips', ensureAuthenticated, express.static(path.join(__dirname, 'payslips')));
 
@@ -240,12 +248,42 @@ app.get('/register', restrictToIP, (req, res) => {
 });
 
 
-app.get('/dashboard', (req, res) => {
+// Route handler for dashboard
+app.get('/dashboard', async (req, res) => {
   if (!req.isAuthenticated()) {
     return res.redirect('/');
   }
+
   const messages = req.flash() || {};
-  res.render('dashboard', { user: req.user, messages:messages });
+  const username = req.user.username; // Get the username from the authenticated user
+
+  try {
+    console.log("Attempting to load the relevant paylips");
+    const result = await list_users_payslips(username);
+
+    if (result.success) {
+      res.render('dashboard', {
+        user: req.user,
+        messages: messages,
+        payslips: result.data,
+        message: result.message
+      });
+    } else {
+      res.render('dashboard', {
+        user: req.user,
+        messages: messages,
+        payslips: [],
+        message: result.error
+      });
+    }
+  } catch (error) {
+    res.render('dashboard', {
+      user: req.user,
+      messages: messages,
+      payslips: [],
+      message: 'An unexpected error occurred: ' + error.message
+    });
+  }
 });
 
 app.get('/logout', (req, res) => {
@@ -619,6 +657,33 @@ async function tidy_up_submission(username, filename) {
   });
 }
 
+
+app.post('/view_payslip', async (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.redirect('/');
+  }
+
+  const username = req.user.username; // Assuming the username is stored in req.user
+  const payslipId = req.body.payslip_id; // Get payslip_id from form submission
+
+  try {
+    // Call the function to load the single payslip data
+    const payslipData = await load_single_payslip(username, payslipId);
+
+    // Render the payslip data on a new page or redirect with data if necessary
+    // Assuming you want to render a page or pass data to another route
+    res.render('view_payslip', {
+      user: req.user,
+      payslip: payslipData, // Send the payslip data to the view
+      messages: req.flash() // Include any flash messages if applicable
+    });
+
+  } catch (error) {
+    console.error('Error loading payslip:', error.message);
+    req.flash('error', 'Failed to load payslip. Please try again.'); // Flash an error message
+    res.redirect('/dashboard'); // Redirect back to the dashboard
+  }
+});
 
 
 app.listen(port, () => {
