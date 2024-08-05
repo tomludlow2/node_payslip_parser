@@ -7,6 +7,8 @@
     "express": "^4.19.2",
     "express-fileupload": "^1.5.1",
     "express-session": "^1.18.0",
+    "json-2-csv": "^5.5.5",
+    "node-excel-export": "^1.4.4",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",

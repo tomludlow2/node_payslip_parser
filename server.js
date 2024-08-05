@@ -20,6 +20,8 @@ const { process_loaded_payslip } = require('./split_sections');
 const { send_to_postgres } = require('./payslip_insert');
 const { list_users_payslips} = require('./data_functions/list_users_payslips');
 const { load_single_payslip} = require('./data_functions/load_single_payslip');
+const { json2csvAsync} = require( 'json-2-csv');
+const excel = require( 'node-excel-export');
 
 const app = express();
 const port = 52535;
@@ -94,6 +96,23 @@ async function readPDF(file) {
       reject(err);
     }
   });
+}
+
+// Helper function to get start and end dates for the tax year
+function getTaxYearDates(year) {
+  const startDate = new Date(year, 3, 6); // April 6
+  const endDate = new Date(year + 1, 3, 5); // April 5 of next year
+  return { startDate, endDate };
+}
+
+// Helper function to get start and end dates for the academic year
+function getAcademicYearDates(year) {
+  const startDate = new Date(year, 7, 1); // August 1
+  startDate.setDate(startDate.getDate() + ((3 - startDate.getDay() + 7) % 7)); // First Wednesday in August
+  const endDate = new Date(startDate);
+  endDate.setFullYear(startDate.getFullYear() + 1);
+  endDate.setDate(endDate.getDate() - 1); // One day before the same Wednesday next year
+  return { startDate, endDate };
 }
 
 // Define a helper function to format dates
@@ -658,6 +677,35 @@ async function tidy_up_submission(username, filename) {
 }
 
 
+app.get('/view_payslip', async(req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.redirect('/');
+  }
+
+  const username = req.user.username; // Assuming the username is stored in req.user
+  const payslipId = req.query.payslip_id; // Get payslip_id from form submission
+
+  console.log(username, payslipId);
+
+  try {
+    // Call the function to load the single payslip data
+    const payslipData = await load_single_payslip(username, payslipId);
+
+    // Render the payslip data on a new page or redirect with data if necessary
+    // Assuming you want to render a page or pass data to another route
+    res.render('view_payslip', {
+      user: req.user,
+      payslip: payslipData, // Send the payslip data to the view
+      messages: req.flash() // Include any flash messages if applicable
+    });
+
+  } catch (error) {
+    console.error('Error loading payslip:', error.message);
+    req.flash('error', 'Failed to load payslip. Please try again.'); // Flash an error message
+    res.redirect('/dashboard'); // Redirect back to the dashboard
+  }
+})
+
 app.post('/view_payslip', async (req, res) => {
   if (!req.isAuthenticated()) {
     return res.redirect('/');
@@ -686,8 +734,147 @@ app.post('/view_payslip', async (req, res) => {
 });
 
 
+// Route to fetch payslip data filtered by tax year or academic year
+app.get('/api/payslips', ensureAuthenticated, async (req, res) => {
+  try {
+    const { yearType, year } = req.query;
+
+    let startDate, endDate;
+    if (yearType === 'tax') {
+      ({ startDate, endDate } = getTaxYearDates(parseInt(year)));
+    } else if (yearType === 'academic') {
+      ({ startDate, endDate } = getAcademicYearDates(parseInt(year)));
+    } else {
+      return res.status(400).json({ error: 'Invalid year type' });
+    }
+
+    const payslips = await pool.query(
+      `SELECT id, username, demographics->>'location' AS location, job->>'job_title' AS job_title,
+              job->>'department' AS department, this_period_summary->>'total_payments' AS total_payments,
+              this_period_summary->>'total_deductions' AS total_deductions, this_period_summary->>'net_pay' AS net_pay,
+              pay_date
+       FROM payslips
+       WHERE pay_date BETWEEN $1 AND $2 AND username = $3`,
+      [startDate, endDate, req.user.username]
+    );
+
+    res.json(payslips.rows);
+  } catch (error) {
+    console.error('Error fetching payslips:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Route to export payslip data to JSON
+app.get('/api/payslips/export/json', ensureAuthenticated, async (req, res) => {
+  try {
+    const { yearType, year } = req.query;
+
+    let startDate, endDate;
+    if (yearType === 'tax') {
+      ({ startDate, endDate } = getTaxYearDates(parseInt(year)));
+    } else if (yearType === 'academic') {
+      ({ startDate, endDate } = getAcademicYearDates(parseInt(year)));
+    } else {
+      return res.status(400).json({ error: 'Invalid year type' });
+    }
+
+    const payslips = await pool.query(
+      `SELECT id, username, demographics->>'location' AS location, job->>'job_title' AS job_title,
+              job->>'department' AS department, this_period_summary->>'total_payments' AS total_payments,
+              this_period_summary->>'total_deductions' AS total_deductions, this_period_summary->>'net_pay' AS net_pay,
+              pay_date
+       FROM payslips
+       WHERE pay_date BETWEEN $1 AND $2 AND username = $3`,
+      [startDate, endDate, req.user.username]
+    );
+
+    res.json(payslips.rows);
+  } catch (error) {
+    console.error('Error exporting payslips to JSON:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Route to export payslip data to Excel
+app.get('/api/payslips/export/excel', ensureAuthenticated, async (req, res) => {
+  try {
+    const { yearType, year } = req.query;
+
+    let startDate, endDate;
+    if (yearType === 'tax') {
+      ({ startDate, endDate } = getTaxYearDates(parseInt(year)));
+    } else if (yearType === 'academic') {
+      ({ startDate, endDate } = getAcademicYearDates(parseInt(year)));
+    } else {
+      return res.status(400).json({ error: 'Invalid year type' });
+    }
+
+    const payslips = await pool.query(
+      `SELECT id, username, demographics->>'location' AS location, job->>'job_title' AS job_title,
+              job->>'department' AS department, this_period_summary->>'total_payments' AS total_payments,
+              this_period_summary->>'total_deductions' AS total_deductions, this_period_summary->>'net_pay' AS net_pay,
+              pay_date
+       FROM payslips
+       WHERE pay_date BETWEEN $1 AND $2 AND username = $3`,
+      [startDate, endDate, req.user.username]
+    );
+
+    // Define the Excel document structure
+    const styles = {
+      headerDark: {
+        fill: {
+          fgColor: {
+            rgb: 'FF000000'
+          }
+        },
+        font: {
+          color: {
+            rgb: 'FFFFFFFF'
+          },
+          sz: 14,
+          bold: true,
+          underline: true
+        }
+      }
+    };
+
+    const specification = {
+      location: { displayName: 'Location', headerStyle: styles.headerDark, width: 120 },
+      job_title: { displayName: 'Job Title', headerStyle: styles.headerDark, width: 120 },
+      department: { displayName: 'Department', headerStyle: styles.headerDark, width: 120 },
+      total_payments: { displayName: 'Total Payments', headerStyle: styles.headerDark, width: 120 },
+      total_deductions: { displayName: 'Total Deductions', headerStyle: styles.headerDark, width: 120 },
+      net_pay: { displayName: 'Net Pay', headerStyle: styles.headerDark, width: 120 },
+      pay_date: { displayName: 'Pay Date', headerStyle: styles.headerDark, width: 120 }
+    };
+
+    const dataset = payslips.rows;
+
+    const report = excel.buildExport([
+      {
+        name: 'Payslips',
+        specification: specification,
+        data: dataset
+      }
+    ]);
+
+    res.attachment('payslips.xlsx');
+    return res.send(report);
+  } catch (error) {
+    console.error('Error exporting payslips to Excel:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/payslip_table', ensureAuthenticated, (req, res) => {
+  res.render('payslip_table');
+});
+
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
+
+
 
 

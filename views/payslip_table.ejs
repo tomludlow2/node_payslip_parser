@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payslip Table</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.18.3/bootstrap-table.min.css">
+  <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-table/1.18.3/bootstrap-table.min.js"></script>
+</head>
+<body>
+  <!-- Include the navigation bar partial -->
+  <%- include('partials/_navbar') %>
+
+  <div class="container mt-4">
+    <h2>Payslip Table</h2>
+    <div class="form-row align-items-end">
+      <div class="col-auto">
+        <label for="yearType">Year Type</label>
+        <select id="yearType" class="form-control">
+          <option value="tax">Tax Year</option>
+          <option value="academic">Academic Year</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label for="year">Year</label>
+        <input type="number" id="year" class="form-control" value="<%= new Date().getFullYear() %>">
+      </div>
+      <div class="col-auto">
+        <button id="filter" class="btn btn-primary">Filter</button>
+      </div>
+      <div class="col-auto">
+        <button id="exportJson" class="btn btn-secondary">Export to JSON</button>
+      </div>
+      <div class="col-auto">
+        <button id="exportExcel" class="btn btn-secondary">Export to Excel</button>
+      </div>
+    </div>
+    <table id="payslipTable" 
+           class="table table-bordered table-hover mt-3"
+           data-toggle="table"
+           data-pagination="true"
+           data-search="true"
+           data-show-columns="true">
+      <thead>
+        <tr>
+          <th data-field="location">Location</th>
+          <th data-field="job_title">Job Title</th>
+          <th data-field="department">Department</th>
+          <th data-field="total_payments">Total Payments</th>
+          <th data-field="total_deductions">Total Deductions</th>
+          <th data-field="net_pay">Net Pay</th>
+          <th data-field="pay_date">Pay Date</th>
+          <th data-field="view_payslip">View Payslip</th>
+        </tr>
+      </thead>
+      <tbody>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    function formatDate(dateString) {
+      const options = { day: '2-digit', month: '2-digit', year: '2-digit' };
+      return new Date(dateString).toLocaleDateString('en-GB', options);
+    }
+
+    document.getElementById('filter').addEventListener('click', function() {
+      const yearType = document.getElementById('yearType').value;
+      const year = document.getElementById('year').value;
+
+      fetch(`/api/payslips?yearType=${yearType}&year=${year}`)
+        .then(response => response.json())
+        .then(data => {
+          data.forEach(item => {
+            item.pay_date = formatDate(item.pay_date);
+            item.view_payslip = `<a href="/view_payslip?payslip_id=${item.id}" class="btn btn-primary">View Payslip</a>`;
+          });
+          $('#payslipTable').bootstrapTable('load', data);
+        })
+        .catch(error => console.error('Error fetching payslip data:', error));
+    });
+
+    document.getElementById('exportJson').addEventListener('click', function() {
+      const yearType = document.getElementById('yearType').value;
+      const year = document.getElementById('year').value;
+
+      window.location.href = `/api/payslips/export/json?yearType=${yearType}&year=${year}`;
+    });
+
+    document.getElementById('exportExcel').addEventListener('click', function() {
+      const yearType = document.getElementById('yearType').value;
+      const year = document.getElementById('year').value;
+
+      window.location.href = `/api/payslips/export/excel?yearType=${yearType}&year=${year}`;
+    });
+
+    // Initial load
+    document.getElementById('filter').click();
+  </script>
+</body>
+</html>
