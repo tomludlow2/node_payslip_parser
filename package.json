@@ -1,19 +1,36 @@
 {
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "connect-flash": "^0.1.1",
     "dotenv": "^16.4.5",
     "ejs": "^3.1.10",
-    "express": "^4.19.2",
+    "exceljs": "^4.4.0",
+    "express": "^4.22.3",
     "express-fileupload": "^1.5.1",
-    "express-session": "^1.18.0",
-    "json-2-csv": "^5.5.5",
-    "node-excel-export": "^1.4.4",
-    "parse-pdf": "^1.0.0",
+    "express-session": "^1.19.0",
+    "fast-xml-parser": "^5.11.2",
+    "json-2-csv": "^5.6.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",
     "pdf-parse": "^1.1.1",
     "pg": "^8.12.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "migrate": "node migrate.js",
+    "sync": "node worker.js",
+    "import:legacy": "node import-legacy.js",
+    "test": "node --test test/*.test.js",
+    "test:integration": "bash test/run-postgres.sh",
+    "test:browser": "BROWSER_SMOKE=1 bash test/run-postgres.sh"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1",
+    "prettier": "^3.9.10"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   }
 }

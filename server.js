@@ -1,880 +1,707 @@
-// Load environment variables from .env file during development
-if (process.env.NODE_ENV !== 'production') {
-  require('dotenv').config();
-}
-
-const express = require('express');
-const session = require('express-session');
-const flash = require('connect-flash');
-const passport = require('passport');
-const LocalStrategy = require('passport-local').Strategy;
-const { Strategy: GoogleStrategy } = require('passport-google-oauth20').Strategy;
-const bcrypt = require('bcryptjs');
-const pool = require('./database'); // Import the PostgreSQL connection pool
-const PDFParser = require('pdf-parse');
-const fileUpload = require('express-fileupload');
-const fs = require('fs');
-const path = require('path');
-const { validate_pdf } = require('./validate_pdf'); // Import validate_pdf function
-const { process_loaded_payslip } = require('./split_sections');
-const { send_to_postgres } = require('./payslip_insert');
-const { list_users_payslips} = require('./data_functions/list_users_payslips');
-const { load_single_payslip} = require('./data_functions/load_single_payslip');
-const { json2csvAsync} = require( 'json-2-csv');
-const excel = require( 'node-excel-export');
-
-const app = express();
-const port = 52535;
-
-// Enable trust proxy
-app.set('trust proxy', true);
-
-// Middleware
-// Parse URL-encoded bodies (for x-www-form-urlencoded)
-app.use(express.urlencoded({ extended: true }));
-
-// Parse JSON bodies (for application/json)
-app.use(express.json());
-app.use(session({
-  secret: 'secret',
-  resave: false,
-  saveUninitialized: false,
-}));
-app.use(flash());
-app.use(passport.initialize());
-app.use(passport.session());
-app.use(fileUpload({
-  useTempFiles: true,
-  tempFileDir: './tempFileDir/'
-}));
-app.set('view engine', 'ejs');
-
-// Load environment variables
-if (process.env.NODE_ENV !== 'production') {
-  require('dotenv').config();
-}
-
-// Middleware to restrict access to /register based on IP address
-function restrictToIP(req, res, next) {
-  const allowedIP = '82.15.180.223'; // Replace with your allowed IP address
-
-  // Get the client IP address from the request headers
-  const clientIP = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-
-  console.log(clientIP);
-
-  // Check if the client IP matches the allowed IP
-  if (clientIP !== allowedIP) {
-    return res.status(403).send('Access Forbidden');
-  }
-
-  // If IP is allowed, proceed to the next middleware or route handler
-  next();
-}
-
-// Middleware to check if user is authenticated
-function ensureAuthenticated(req, res, next) {
-  if (req.isAuthenticated()) {
-    return next();
-  }
-  res.redirect('/');
-}
-
-
-// Function to read a PDF file and return its text content
-async function readPDF(file) {
-  return new Promise((resolve, reject) => {
-    try {
-      const dataBuffer = fs.readFileSync(file);
-      PDFParser(dataBuffer).then((data) => {
-        resolve(data.text);
-      }).catch((err) => {
-        reject(err);
-      });
-    } catch (err) {
-      console.error('Error reading PDF file:', err);
-      reject(err);
-    }
-  });
-}
-
-// Helper function to get start and end dates for the tax year
-function getTaxYearDates(year) {
-  const startDate = new Date(year, 3, 6); // April 6
-  const endDate = new Date(year + 1, 3, 5); // April 5 of next year
-  return { startDate, endDate };
-}
-
-// Helper function to get start and end dates for the academic year
-function getAcademicYearDates(year) {
-  const startDate = new Date(year, 7, 1); // August 1
-  startDate.setDate(startDate.getDate() + ((3 - startDate.getDay() + 7) % 7)); // First Wednesday in August
-  const endDate = new Date(startDate);
-  endDate.setFullYear(startDate.getFullYear() + 1);
-  endDate.setDate(endDate.getDate() - 1); // One day before the same Wednesday next year
-  return { startDate, endDate };
-}
-
-// Define a helper function to format dates
-const formatDate = (timestamp) => {
-  const date = new Date(timestamp);
-  const formattedDate = `${date.getDate().toString().padStart(2, '0')}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getFullYear()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-  return formattedDate;
-};
-
-
-
-// Middleware to make formatDate available to all EJS templates
-app.use((req, res, next) => {
-  res.locals.formatDate = formatDate;
-  next();
-});
-
-
-// User Authentication
-passport.use(new LocalStrategy(
-  async (username, password, done) => {
-    try {
-      const res = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-      const user = res.rows[0];
-      if (!user) {
-        return done(null, false, { message: 'Incorrect username.' });
-      }
-      const match = await bcrypt.compare(password, user.password);
-      if (!match) {
-        return done(null, false, { message: 'Incorrect password.' });
-      }
-      return done(null, user);
-    } catch (err) {
-      return done(err);
-    }
-  }
-));
-
-passport.use(new GoogleStrategy({
-  clientID: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: 'https://pay.tomludlow.co.uk/auth/google/callback'
-}, async (token, tokenSecret, profile, done) => {
-  try {
-    const res = await pool.query('SELECT * FROM users WHERE provider = $1 AND provider_id = $2', ['google', profile.id]);
-    let user = res.rows[0];
-    
-    if (!user) {
-      // Generate username from email (remove dots and hyphens)
-      const username = profile.emails[0].value.replace(/[^a-zA-Z0-9]/g, ''); // Remove dots and hyphens
-      
-      // Insert new user into database
-      user = (await pool.query(
-        'INSERT INTO users (email, username, provider, provider_id, oauth_token, user_category) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-        [profile.emails[0].value, username, 'google', profile.id, token, 'tier_2']
-      )).rows[0];
-    }
-    
-    return done(null, user);
-  } catch (err) {
-    return done(err);
-  }
-}));
-
-
-passport.serializeUser((user, done) => {
-  done(null, user.id);
-});
-
-passport.deserializeUser(async (id, done) => {
-  try {
-    const res = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
-    done(null, res.rows[0]);
-  } catch (err) {
-    done(err);
-  }
-});
-
-// Routes
-app.get('/', (req, res) => {
-  res.render('index', { message: req.flash('error') });
-});
-
-// Route to serve the key_dict.json file
-app.get('/data_functions/key_dict.json', (req, res) => {
-  res.sendFile(path.join(__dirname, 'data_functions', 'key_dict.json'));
-});
-
-// Serve payslip files dynamically based on logged-in user
-app.use('/payslips', ensureAuthenticated, express.static(path.join(__dirname, 'payslips')));
-
-// Example endpoint to handle PDF file
-app.get('/payslips/:username/uploaded/:filename', ensureAuthenticated, (req, res) => {
-  const { username, filename } = req.params;
-  const filePath = path.join(__dirname, 'payslips', username, 'uploaded', filename);
-
-  // Check if the file exists
-  if (fs.existsSync(filePath)) {
-    // Stream the PDF file back to the client
-    res.sendFile(filePath);
-  } else {
-    res.status(404).send('File not found');
-  }
-});
-
-app.get('/login', (req, res) => {
-  res.render('login', { messages: req.flash() }); // Pass flash messages to the template
-});
-
-app.post('/login', passport.authenticate('local', {
-  successRedirect: '/dashboard',
-  failureRedirect: '/login',
-  failureFlash: true
-}));
-
-app.get('/auth/google',
-  passport.authenticate('google', { scope: ['https://www.googleapis.com/auth/plus.login', 'email'] })
-);
-
-app.get('/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: '/' }),
-  (req, res) => {
-    res.redirect('/dashboard');
-  }
-);
-
-app.post('/register', async (req, res) => {
-  const { username, password, email, user_category } = req.body;
-  const saltRounds = 10;
-
-  try {
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-    await pool.query(
-      'INSERT INTO users (username, password, email, user_category) VALUES ($1, $2, $3, $4)',
-      [username, hashedPassword, email, user_category]
-    );
-    req.flash('success', 'Registration successful. You can now log in.');
-    res.redirect('/login'); // Redirect to the login page after successful registration
-  } catch (err) {
-    if (err.code === '23505' && err.constraint === 'users_email_key') {
-      req.flash('error', 'Email already registered.');
-    } else {
-      console.error(err);
-      req.flash('error', 'Failed to register. Please try again later.');
-    }
-    res.redirect('/register');
-  }
-});
-
-app.get('/register', restrictToIP, (req, res) => {
-  res.render('register', { messages: req.flash() }); // Render the registration form
-});
-
-
-// Route handler for dashboard
-app.get('/dashboard', async (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.redirect('/');
-  }
-
-  const messages = req.flash() || {};
-  const username = req.user.username; // Get the username from the authenticated user
-
-  try {
-    console.log("Attempting to load the relevant paylips");
-    const result = await list_users_payslips(username);
-
-    if (result.success) {
-      res.render('dashboard', {
-        user: req.user,
-        messages: messages,
-        payslips: result.data,
-        message: result.message
-      });
-    } else {
-      res.render('dashboard', {
-        user: req.user,
-        messages: messages,
-        payslips: [],
-        message: result.error
-      });
-    }
-  } catch (error) {
-    res.render('dashboard', {
-      user: req.user,
-      messages: messages,
-      payslips: [],
-      message: 'An unexpected error occurred: ' + error.message
+require("./lib/pg-types");
+require("dotenv").config();
+const express = require("express");
+const session = require("express-session");
+const passportModule = require("passport");
+const LocalStrategy = require("passport-local").Strategy;
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
+const path = require("path");
+const fs = require("fs/promises");
+const fileUpload = require("express-fileupload");
+const PgStore = require("./lib/session-store");
+const { Imports, MAX_BYTES } = require("./lib/imports");
+const { yearRange } = require("./lib/validation");
+const categories = require("./lib/categories");
+const wrap = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
+function createApp(pool, config = process.env) {
+  const ownerId = Number(config.OWNER_ID);
+  if (!Number.isSafeInteger(ownerId) || ownerId < 1)
+    throw new Error("OWNER_ID must identify an existing owner");
+  if (!config.SESSION_SECRET || config.SESSION_SECRET.length < 32)
+    throw new Error("SESSION_SECRET must have at least 32 characters");
+  const app = express(),
+    passport = new passportModule.Passport(),
+    imports = new Imports(pool, config.STORAGE_ROOT);
+  const production = config.NODE_ENV === "production";
+  const google = Boolean(
+    config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET,
+  );
+  const nextcloud = Boolean(
+    config.NEXTCLOUD_URL &&
+    config.NEXTCLOUD_USERNAME &&
+    config.NEXTCLOUD_APP_PASSWORD &&
+    config.NEXTCLOUD_FOLDER,
+  );
+  app.disable("x-powered-by");
+  app.set("trust proxy", config.TRUST_PROXY || false);
+  app.set("view engine", "ejs");
+  app.set("views", path.join(__dirname, "views"));
+  app.use((req, res, next) => {
+    Object.assign(res.locals, {
+      csrf: "",
+      user: null,
+      google: false,
+      nextcloud: false,
+      current: req.path,
+      notice: null,
     });
-  }
-});
-
-app.get('/logout', (req, res) => {
-  req.logout((err) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).send('Failed to logout');
-    }
-    res.redirect('/');
-  });
-});
-
-// Route to view users (accessible only to admin)
-app.get('/view_users', async (req, res) => {
-  try {
-    // Check if user is authenticated and is an admin
-    if (!req.isAuthenticated() || req.user.user_category !== 'admin') {
-      return res.redirect('/');
-    }
-
-    // Fetch users with their authentication provider information
-    const users = await pool.query('SELECT id, username, email, user_category, provider FROM users');
-
-    // Render the view_users.ejs template with the users data
-    res.render('view_users', { users: users.rows });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Route to update user category (accessible only to admin)
-app.post('/update_user_category', async (req, res) => {
-  try {
-    // Check if user is authenticated and is an admin
-    if (!req.isAuthenticated() || req.user.user_category !== 'admin') {
-      return res.redirect('/');
-    }
-    
-    const { userId, userCategory } = req.body;
-
-    // Update user category in the database
-    await pool.query('UPDATE users SET user_category = $1 WHERE id = $2', [userCategory, userId]);
-
-    res.redirect('/view_users');
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Route to delete a user (accessible only to admin)
-app.post('/delete_user', async (req, res) => {
-  try {
-    // Check if user is authenticated and is an admin
-    if (!req.isAuthenticated() || req.user.user_category !== 'admin') {
-      return res.status(403).send('Unauthorized'); // Send 403 Forbidden for unauthorized access
-    }
-
-    const userId = req.body.userId; // Assuming you pass userId via POST request
-
-    // Delete the user from the database
-    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
-
-    res.redirect('/view_users'); // Redirect back to view_users page after deletion
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Route to change user password (accessible only to admin)
-app.post('/change_password', async (req, res) => {
-  try {
-    // Check if user is authenticated and is an admin
-    if (!req.isAuthenticated() || req.user.user_category !== 'admin') {
-      return res.status(403).send('Unauthorized'); // Send 403 Forbidden for unauthorized access
-    }
-
-    const userId = req.body.userId; // Assuming you pass userId via POST request
-    const newPassword = req.body.newPassword; // Assuming you pass newPassword via POST request
-
-    // Hash the new password
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    // Update the user's password in the database
-    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashedPassword, userId]);
-
-    res.redirect('/view_users'); // Redirect back to view_users page after password change
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Internal Server Error');
-  }
-});
-
-// Route to serve upload page
-app.get('/upload', (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.redirect('/');
-  }
-  
-  res.render('upload', { messages: req.flash() });
-});
-
-// Route to handle file upload
-app.post('/upload', ensureAuthenticated, async (req, res) => {
-  console.log('req.files:', req.files); // Debugging output
-
-  if (!req.files || !req.files.uploadedFile) {
-    req.flash('error', 'No file uploaded.');
-    return res.redirect('/upload');
-  }
-
-  const uploadedFile = req.files.uploadedFile;
-  // Check file type (must be PDF)
-  if (uploadedFile.mimetype !== 'application/pdf') {
-    req.flash('error', 'Only PDF files are allowed.');
-    return res.redirect('/upload');
-  }
-
-  try {
-    const pdfContent = await readPDF(uploadedFile.tempFilePath);
-    
-    // Validate the PDF content
-    const isValid = await validate_pdf(pdfContent);
-
-    if (!isValid) {
-      req.flash('error', 'Invalid PDF content.');
-      return res.redirect('/upload');
-    }
-
-    // Save the file to /payslips/username/uploaded/
-    const username = req.user.username;
-    const uploadDir = path.join(__dirname, 'payslips', req.user.username, 'uploaded');
-    // Check if the directory exists, create it if it doesn't
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true }); // recursive true creates parent directories if they don't exist
-    }
-
-    // Now move the file to the destination
-    uploadedFile.mv(path.join(uploadDir, uploadedFile.name), (err) => {
-      if (err) {
-        console.error('Error saving file:', err);
-        req.flash('error', 'Failed to save the file.');
-        return res.redirect('/upload');
-      }
-      req.flash('success', 'File uploaded successfully.');
-      res.redirect('/upload');
+    res.set({
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "same-origin",
+      "Content-Security-Policy":
+        "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'",
     });
-  } catch (err) {
-    console.error('Error processing upload:', err);
-    req.flash('error', 'Failed to process the file.');
-    res.redirect('/upload');
-  }
-});
-
-// Route to render view_pending_payslips.ejs
-app.get('/view_pending_payslips', ensureAuthenticated, async (req, res) => {
-  const username = req.user.username;
-  const directoryPath = path.join(__dirname, `payslips/${username}/uploaded`);
-
-  try {
-    // Read directory contents with file stats
-    fs.readdir(directoryPath, (err, files) => {
-      if (err) {
-        console.error('Error reading directory:', err);
-        req.flash('error', 'Failed to fetch pending payslips.');
-        return res.redirect('/view_pending_payslips'); // Redirect to handle error
+    if (!req.path.startsWith("/assets/")) res.set("Cache-Control", "no-store");
+    next();
+  });
+  app.use("/assets", express.static(path.join(__dirname, "public")));
+  app.use(express.urlencoded({ extended: false, limit: "2mb" }));
+  app.use(express.json({ limit: "2mb" }));
+  app.use(
+    session({
+      store: new PgStore(pool),
+      secret: config.SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        httpOnly: true,
+        secure: production,
+        sameSite: "lax",
+        maxAge: 86400000,
+      },
+    }),
+  );
+  app.use(passport.initialize());
+  app.use(passport.session());
+  passport.use(
+    new LocalStrategy(async (username, password, done) => {
+      try {
+        const u = (
+          await pool.query("SELECT * FROM users WHERE id=$1 AND username=$2", [
+            ownerId,
+            username,
+          ])
+        ).rows[0];
+        if (!u?.password || !(await bcrypt.compare(password, u.password)))
+          return done(null, false);
+        done(null, u);
+      } catch (e) {
+        done(e);
       }
-
-      // Prepare an array to store file details
-      const filesWithStats = [];
-
-      // Iterate through files and get their stats
-      files.forEach(file => {
-        const filePath = path.join(directoryPath, file);
-        const stats = fs.statSync(filePath);
-        const createdAt = stats.birthtime; // File creation time
-
-        filesWithStats.push({
-          name: file,
-          createdAt: createdAt,
-        });
-      });
-
-      // Render view_pending_payslips.ejs with files list and their creation times
-      res.render('view_pending_payslips', {
-        files: filesWithStats,
-        messages: {
-          error: req.flash('error'),
-          success: req.flash('success'),
+    }),
+  );
+  if (google)
+    passport.use(
+      new GoogleStrategy(
+        {
+          clientID: config.GOOGLE_CLIENT_ID,
+          clientSecret: config.GOOGLE_CLIENT_SECRET,
+          callbackURL:
+            config.GOOGLE_CALLBACK_URL ||
+            "https://pay.tomoutlaw.co.uk/auth/google/callback",
+          state: true,
         },
-      });
-    });
-  } catch (err) {
-    console.error('Error fetching payslips:', err);
-    req.flash('error', 'Failed to fetch pending payslips.');
-    res.redirect('/view_pending_payslips'); // Redirect to handle error
-  }
-});
-
-// Route to process payslip
-app.post('/process_payslip', ensureAuthenticated, async (req, res) => {
-  const { filename } = req.body;
-
-  // Assuming the path where payslips are stored
-  const filePath = path.join(__dirname, 'payslips', req.user.username, 'uploaded', filename);
-
-  try {
-    // Read the PDF file
-    const pdfText = await readPDF(filePath);
-    // Process the loaded PDF
-    const result = await process_loaded_payslip(pdfText, filename);
-
-    // Render the approve_pending_payslip view with PDF and JSON content
-    res.render('approve_pending_payslip', {
-      pdfFilePath: `${filename}`,
-      username: req.user.username,
-      jsonContent: result,
-      messages: { success: 'PDF processed successfully.' } // Flash message if needed
-    });
-  } catch (err) {
-    console.error('Error processing payslip:', err);
-    req.flash('error', 'Failed to process payslip.');
-    res.redirect('/view_pending_payslips'); // Redirect to the pending payslips view on error
-  }
-});
-
-// Route to render approve_pending_payslip view
-app.get('/approve_pending_payslip', ensureAuthenticated, (req, res) => {
-  res.render('approve_pending_payslip', {
-    pdfFilePath: null,
-    jsonContent: null,
-    messages: { error: req.flash('error'), success: req.flash('success') }
-  });
-});
-
-
-// POST endpoint to delete a payslip file
-app.post('/delete-payslip', ensureAuthenticated, (req, res) => {
-  const username = req.user.username; // Assuming you have user authentication
-  const filename = req.body.filename; // Assuming the filename is sent in the request body
-
-  if (!filename) {
-    console.error('Error: filename is missing or undefined in request body');
-    req.flash('error', 'Filename is required');
-    return res.status(400).redirect('/view_pending_payslips'); // Redirect to view_pending_payslips with error message
-  }
-
-  // Correct directory path for uploaded payslips
-  const payslipDirectory = path.join(__dirname, 'payslips', username, 'uploaded');
-  const filePath = path.join(payslipDirectory, filename);
-
-  fs.unlink(filePath, (err) => {
-    if (err) {
-      console.error('Error deleting file:', err);
-      req.flash('error', 'Failed to delete payslip file.');
-    } else {
-      req.flash('success', 'Payslip deleted successfully.');
-    }
-    res.redirect('/view_pending_payslips'); // Redirect to the view_pending_payslips view
-  });
-});
-
-
-// POST endpoint to submit a payslip
-app.post('/submit-payslip', ensureAuthenticated, async (req, res) => {
-  const username = req.user.username; // Assuming user authentication middleware sets req.user
-  const formData = req.body; // Form data sent in the request body
-  const isDuplicateConfirmed = formData.isDuplicateConfirmed === 'true'; // Convert to boolean
-
-  // Remove isDuplicateConfirmed from formData
-  const { isDuplicateConfirmed: _, ...filteredFormData } = formData;
-
-  // Example console log to output formData
-  console.log('Received payslip data for user:', username);
-  console.log(filteredFormData);
-
-  try {
-    // Call the send_to_postgres function
-    const result = await send_to_postgres(username, filteredFormData, isDuplicateConfirmed);
-
-    // Ensure result is an object with status and message
-    if (typeof result !== 'object' || result === null || !result.status || !result.message) {
-      throw new Error('Unexpected result format');
-    }
-
-    if (result.status === 'duplicate') {
-      req.flash('info', result.message);
-      res.status(409).json({ message: result.message, status: 'duplicate', isDuplicate: true });
-    } else if (result.status === 'success') {
-      // Perform any additional processing like moving files
-      if (formData.filename) {
-        await tidy_up_submission(username, formData.filename);
-      }
-      req.flash('success', result.message);
-      res.status(200).json({ message: result.message, status: 'success' });
-    } else {
-      throw new Error('Unexpected status received from database operation');
-    }
-  } catch (error) {
-    console.error('Error submitting payslip:', error.message);
-    req.flash('error', 'Failed to submit payslip.');
-    res.status(500).json({ message: 'Failed to submit payslip.', status: 'error' });
-  }
-});
-
-
-// Route to render the duplicate confirmation page
-app.get('/confirm-duplicate', ensureAuthenticated, (req, res) => {
-  const formData = req.query; // Retrieve form data from query parameters
-
-  res.render('confirm_duplicate', { 
-    messages: req.flash('info'),
-    formData: formData
-  });
-});
-
-// POST endpoint to handle duplicate confirmation
-app.post('/submit-duplicate', ensureAuthenticated, async (req, res) => {
-  const username = req.user.username;
-  const formData = req.body;
-
-  try {
-    // Call send_to_postgres with isDuplicateConfirmed set to true
-    const result = await send_to_postgres(username, formData, true);
-
-    if (result.status === 'success') {
-      await tidy_up_submission(username, formData.filename);
-      req.flash('success', result.message);
-      res.redirect('/dashboard');
-    } else {
-      req.flash('error', 'Failed to submit payslip.');
-      res.redirect('/dashboard');
-    }
-  } catch (error) {
-    console.error('Error submitting payslip:', error.message);
-    req.flash('error', 'Failed to submit payslip.');
-    res.redirect('/dashboard');
-  }
-});
-
-
-
-// Function to move the file and ensure directories are created
-async function tidy_up_submission(username, filename) {
-  const uploadedDir = path.join(__dirname, 'payslips', username, 'uploaded');
-  const processedDir = path.join(__dirname, 'payslips', username, 'processed');
-  
-  // Define source and destination paths
-  const sourcePath = path.join(uploadedDir, filename);
-  const destinationPath = path.join(processedDir, filename);
-  
-  // Ensure directories exist
-  if (!fs.existsSync(uploadedDir)) {
-    fs.mkdirSync(uploadedDir, { recursive: true });
-  }
-  if (!fs.existsSync(processedDir)) {
-    fs.mkdirSync(processedDir, { recursive: true });
-  }
-  
-  // Move the file from uploaded to processed
-  return new Promise((resolve, reject) => {
-    fs.rename(sourcePath, destinationPath, (err) => {
-      if (err) {
-        reject(new Error(`Failed to move file: ${err.message}`));
-      } else {
-        resolve();
-      }
-    });
-  });
-}
-
-
-app.get('/view_payslip', async(req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.redirect('/');
-  }
-
-  const username = req.user.username; // Assuming the username is stored in req.user
-  const payslipId = req.query.payslip_id; // Get payslip_id from form submission
-
-  console.log(username, payslipId);
-
-  try {
-    // Call the function to load the single payslip data
-    const payslipData = await load_single_payslip(username, payslipId);
-
-    // Render the payslip data on a new page or redirect with data if necessary
-    // Assuming you want to render a page or pass data to another route
-    res.render('view_payslip', {
-      user: req.user,
-      payslip: payslipData, // Send the payslip data to the view
-      messages: req.flash() // Include any flash messages if applicable
-    });
-
-  } catch (error) {
-    console.error('Error loading payslip:', error.message);
-    req.flash('error', 'Failed to load payslip. Please try again.'); // Flash an error message
-    res.redirect('/dashboard'); // Redirect back to the dashboard
-  }
-})
-
-app.post('/view_payslip', async (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.redirect('/');
-  }
-
-  const username = req.user.username; // Assuming the username is stored in req.user
-  const payslipId = req.body.payslip_id; // Get payslip_id from form submission
-
-  try {
-    // Call the function to load the single payslip data
-    const payslipData = await load_single_payslip(username, payslipId);
-
-    // Render the payslip data on a new page or redirect with data if necessary
-    // Assuming you want to render a page or pass data to another route
-    res.render('view_payslip', {
-      user: req.user,
-      payslip: payslipData, // Send the payslip data to the view
-      messages: req.flash() // Include any flash messages if applicable
-    });
-
-  } catch (error) {
-    console.error('Error loading payslip:', error.message);
-    req.flash('error', 'Failed to load payslip. Please try again.'); // Flash an error message
-    res.redirect('/dashboard'); // Redirect back to the dashboard
-  }
-});
-
-
-// Route to fetch payslip data filtered by tax year or academic year
-app.get('/api/payslips', ensureAuthenticated, async (req, res) => {
-  try {
-    const { yearType, year } = req.query;
-
-    let startDate, endDate;
-    if (yearType === 'tax') {
-      ({ startDate, endDate } = getTaxYearDates(parseInt(year)));
-    } else if (yearType === 'academic') {
-      ({ startDate, endDate } = getAcademicYearDates(parseInt(year)));
-    } else {
-      return res.status(400).json({ error: 'Invalid year type' });
-    }
-
-    const payslips = await pool.query(
-      `SELECT id, username, demographics->>'location' AS location, job->>'job_title' AS job_title,
-              job->>'department' AS department, this_period_summary->>'total_payments' AS total_payments,
-              this_period_summary->>'total_deductions' AS total_deductions, this_period_summary->>'net_pay' AS net_pay,
-              pay_date
-       FROM payslips
-       WHERE pay_date BETWEEN $1 AND $2 AND username = $3`,
-      [startDate, endDate, req.user.username]
-    );
-
-    res.json(payslips.rows);
-  } catch (error) {
-    console.error('Error fetching payslips:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Route to export payslip data to JSON
-app.get('/api/payslips/export/json', ensureAuthenticated, async (req, res) => {
-  try {
-    const { yearType, year } = req.query;
-
-    let startDate, endDate;
-    if (yearType === 'tax') {
-      ({ startDate, endDate } = getTaxYearDates(parseInt(year)));
-    } else if (yearType === 'academic') {
-      ({ startDate, endDate } = getAcademicYearDates(parseInt(year)));
-    } else {
-      return res.status(400).json({ error: 'Invalid year type' });
-    }
-
-    const payslips = await pool.query(
-      `SELECT id, username, demographics->>'location' AS location, job->>'job_title' AS job_title,
-              job->>'department' AS department, this_period_summary->>'total_payments' AS total_payments,
-              this_period_summary->>'total_deductions' AS total_deductions, this_period_summary->>'net_pay' AS net_pay,
-              pay_date
-       FROM payslips
-       WHERE pay_date BETWEEN $1 AND $2 AND username = $3`,
-      [startDate, endDate, req.user.username]
-    );
-
-    res.json(payslips.rows);
-  } catch (error) {
-    console.error('Error exporting payslips to JSON:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Route to export payslip data to Excel
-app.get('/api/payslips/export/excel', ensureAuthenticated, async (req, res) => {
-  try {
-    const { yearType, year } = req.query;
-
-    let startDate, endDate;
-    if (yearType === 'tax') {
-      ({ startDate, endDate } = getTaxYearDates(parseInt(year)));
-    } else if (yearType === 'academic') {
-      ({ startDate, endDate } = getAcademicYearDates(parseInt(year)));
-    } else {
-      return res.status(400).json({ error: 'Invalid year type' });
-    }
-
-    const payslips = await pool.query(
-      `SELECT id, username, demographics->>'location' AS location, job->>'job_title' AS job_title,
-              job->>'department' AS department, this_period_summary->>'total_payments' AS total_payments,
-              this_period_summary->>'total_deductions' AS total_deductions, this_period_summary->>'net_pay' AS net_pay,
-              pay_date
-       FROM payslips
-       WHERE pay_date BETWEEN $1 AND $2 AND username = $3`,
-      [startDate, endDate, req.user.username]
-    );
-
-    // Define the Excel document structure
-    const styles = {
-      headerDark: {
-        fill: {
-          fgColor: {
-            rgb: 'FF000000'
+        async (token, refresh, profile, done) => {
+          try {
+            const u = (
+              await pool.query(
+                "SELECT * FROM users WHERE id=$1 AND provider='google' AND provider_id=$2",
+                [ownerId, profile.id],
+              )
+            ).rows[0];
+            done(null, u || false);
+          } catch (e) {
+            done(e);
           }
         },
-        font: {
-          color: {
-            rgb: 'FFFFFFFF'
-          },
-          sz: 14,
-          bold: true,
-          underline: true
-        }
-      }
-    };
-
-    const specification = {
-      location: { displayName: 'Location', headerStyle: styles.headerDark, width: 120 },
-      job_title: { displayName: 'Job Title', headerStyle: styles.headerDark, width: 120 },
-      department: { displayName: 'Department', headerStyle: styles.headerDark, width: 120 },
-      total_payments: { displayName: 'Total Payments', headerStyle: styles.headerDark, width: 120 },
-      total_deductions: { displayName: 'Total Deductions', headerStyle: styles.headerDark, width: 120 },
-      net_pay: { displayName: 'Net Pay', headerStyle: styles.headerDark, width: 120 },
-      pay_date: { displayName: 'Pay Date', headerStyle: styles.headerDark, width: 120 }
-    };
-
-    const dataset = payslips.rows;
-
-    const report = excel.buildExport([
-      {
-        name: 'Payslips',
-        specification: specification,
-        data: dataset
-      }
-    ]);
-
-    res.attachment('payslips.xlsx');
-    return res.send(report);
-  } catch (error) {
-    console.error('Error exporting payslips to Excel:', error);
-    res.status(500).json({ error: 'Internal server error' });
+      ),
+    );
+  passport.serializeUser((u, done) => done(null, u.id));
+  passport.deserializeUser(async (id, done) => {
+    try {
+      if (Number(id) !== ownerId) return done(null, false);
+      done(
+        null,
+        (await pool.query("SELECT * FROM users WHERE id=$1", [ownerId]))
+          .rows[0] || false,
+      );
+    } catch (e) {
+      done(e);
+    }
+  });
+  app.use((req, res, next) => {
+    req.session.csrf ||= crypto.randomBytes(32).toString("hex");
+    res.locals.csrf = req.session.csrf;
+    res.locals.user = req.user;
+    res.locals.google = google;
+    res.locals.nextcloud = nextcloud;
+    res.locals.current = req.path;
+    res.locals.notice = req.session.notice;
+    delete req.session.notice;
+    res.locals.gbp = (n) =>
+      new Intl.NumberFormat("en-GB", {
+        style: "currency",
+        currency: "GBP",
+      }).format(Number(n || 0));
+    res.locals.date = (d) =>
+      d ? new Date(d).toLocaleDateString("en-GB", { timeZone: "UTC" }) : "—";
+    next();
+  });
+  const csrf = (req, res, next) => {
+    const token = req.get("x-csrf-token") || req.body?._csrf;
+    if (
+      typeof token !== "string" ||
+      Buffer.byteLength(token) !== Buffer.byteLength(req.session.csrf) ||
+      !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(req.session.csrf))
+    )
+      return res
+        .status(403)
+        .send("Invalid form token. Reload the page and try again.");
+    next();
+  };
+  app.use((req, res, next) =>
+    ["GET", "HEAD", "OPTIONS"].includes(req.method) ||
+    (req.method === "POST" && req.path === "/upload")
+      ? next()
+      : csrf(req, res, next),
+  );
+  const auth = (req, res, next) =>
+    req.isAuthenticated() && Number(req.user.id) === ownerId
+      ? next()
+      : req.path.startsWith("/api/")
+        ? res.status(401).json({ error: "Sign in required" })
+        : res.redirect("/login");
+  const rates = new Map();
+  app.post(
+    "/login",
+    (req, res, next) => {
+      const key = req.ip,
+        now = Date.now();
+      for (const [k, v] of rates) if (v.until < now) rates.delete(k);
+      const item = rates.get(key) || { count: 0, until: now + 900000 };
+      item.count++;
+      rates.set(key, item);
+      if (item.count > 10)
+        return res
+          .status(429)
+          .send("Too many sign-in attempts. Try again in 15 minutes.");
+      next();
+    },
+    passport.authenticate("local", { failureRedirect: "/login?failed=1" }),
+    (req, res) => res.redirect("/dashboard"),
+  );
+  app.get("/login", (req, res) =>
+    res.render("signin", { title: "Welcome back", failed: !!req.query.failed }),
+  );
+  app.get("/", (req, res) =>
+    res.redirect(req.isAuthenticated() ? "/dashboard" : "/login"),
+  );
+  app.post("/logout", auth, (req, res, next) =>
+    req.logout((e) => {
+      if (e) return next(e);
+      req.session.destroy((e) => (e ? next(e) : res.redirect("/login")));
+    }),
+  );
+  if (google) {
+    app.get(
+      "/auth/google",
+      passport.authenticate("google", { scope: ["profile", "email"] }),
+    );
+    app.get(
+      "/auth/google/callback",
+      passport.authenticate("google", { failureRedirect: "/login?failed=1" }),
+      (req, res) => res.redirect("/dashboard"),
+    );
   }
-});
-
-app.get('/payslip_table', ensureAuthenticated, (req, res) => {
-  res.render('payslip_table');
-});
-
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
-});
-
-
-
-
+  for (const route of [
+    "/register",
+    "/view_users",
+    "/update_user_category",
+    "/delete_user",
+    "/change_password",
+  ])
+    app.all(route, (req, res) => res.sendStatus(404));
+  async function rows(req) {
+    const type = req.query.yearType || "tax";
+    const now = new Date();
+    const defaultYear =
+      now.getUTCFullYear() - (now.toISOString().slice(5, 10) < "04-06" ? 1 : 0);
+    const year = req.query.year || defaultYear;
+    let range;
+    try {
+      if (!["tax", "academic"].includes(type))
+        throw new Error("Invalid year type");
+      range = year === "all" ? null : yearRange(type, year);
+    } catch (e) {
+      e.status = 400;
+      throw e;
+    }
+    const grade = req.query.grade || "";
+    const location = req.query.location || "";
+    const locumType = req.query.locumType || "";
+    for (const [value, choices] of [
+      [grade, categories.GRADES],
+      [location, categories.LOCATIONS],
+      [locumType, categories.LOCUM_TYPES],
+    ]) {
+      if (value && value !== "Unknown" && !choices.includes(value)) {
+        const e = new Error("Invalid category filter");
+        e.status = 400;
+        throw e;
+      }
+    }
+    const overrides = categories.loadOverrides();
+    const data = (
+      await pool.query(
+        "SELECT * FROM payslips WHERE username=$1" +
+          (range ? " AND pay_date >= $2 AND pay_date < $3" : "") +
+          " ORDER BY pay_date DESC,id DESC",
+        [req.user.username, ...(range || [])],
+      )
+    ).rows
+      .map((p) => ({ ...p, categories: categories.categorise(p, overrides) }))
+      .filter(
+        (p) =>
+          (!grade || (p.categories.grade || "Unknown") === grade) &&
+          (!location || (p.categories.location || "Unknown") === location) &&
+          (!locumType ||
+            (locumType === "Unknown"
+              ? p.categories.grade === "Locum" && !p.categories.locum_type
+              : p.categories.locum_type === locumType)),
+      );
+    return {
+      data,
+      type,
+      year,
+      grade,
+      location,
+      locumType,
+      gradeOptions: categories.GRADES,
+      locationOptions: categories.LOCATIONS,
+      locumOptions: categories.LOCUM_TYPES,
+    };
+  }
+  app.get(
+    "/dashboard",
+    auth,
+    wrap(async (req, res) => {
+      const list = await rows(req);
+      const latest = (
+        await pool.query(
+          "SELECT * FROM payslips WHERE username=$1 ORDER BY pay_date DESC,id DESC LIMIT 1",
+          [req.user.username],
+        )
+      ).rows[0];
+      const count = (
+        await pool.query(
+          "SELECT count(*) FROM import_attempts a JOIN import_sources s ON s.id=a.source_id WHERE s.owner_id=$1 AND a.status IN ('review','failed')",
+          [ownerId],
+        )
+      ).rows[0].count;
+      const state = (await pool.query("SELECT * FROM sync_state WHERE id=1"))
+        .rows[0];
+      res.render("home", {
+        title: "Your pay, clearly.",
+        ...list,
+        latest,
+        count,
+        state,
+      });
+    }),
+  );
+  app.get(
+    "/payslip_table",
+    auth,
+    wrap(async (req, res) =>
+      res.render("library", { title: "Payslip library", ...(await rows(req)) }),
+    ),
+  );
+  app.get(
+    "/api/payslips",
+    auth,
+    wrap(async (req, res) => res.json((await rows(req)).data)),
+  );
+  app.get(
+    "/api/payslips/export/:format",
+    auth,
+    wrap(async (req, res) => {
+      const data = (await rows(req)).data;
+      if (req.params.format === "json")
+        return res.attachment("payslips.json").json(data);
+      if (req.params.format !== "excel") return res.sendStatus(404);
+      const Excel = require("exceljs");
+      const workbook = new Excel.Workbook();
+      const sheet = workbook.addWorksheet("Payslips");
+      sheet.columns = [
+        "pay_date",
+        "total_payments",
+        "total_deductions",
+        "net_pay",
+        "grade",
+        "location",
+        "locum_type",
+        "department",
+        "job_title",
+        "payscale_descriptor",
+      ].map((k) => ({ header: k.replace(/_/g, " "), key: k, width: 22 }));
+      data.forEach((p) =>
+        sheet.addRow({
+          ...p,
+          ...p.categories,
+          pay_date: new Date(p.pay_date).toISOString().slice(0, 10),
+          total_payments: Number(p.total_payments),
+          total_deductions: Number(p.total_deductions),
+          net_pay: Number(p.net_pay),
+        }),
+      );
+      res
+        .attachment("payslips.xlsx")
+        .send(Buffer.from(await workbook.xlsx.writeBuffer()));
+    }),
+  );
+  app.get("/upload", auth, (req, res) =>
+    res.render("intake", { title: "Import payslips" }),
+  );
+  app.post(
+    "/upload",
+    auth,
+    fileUpload({
+      limits: { fileSize: MAX_BYTES, files: 1 },
+      abortOnLimit: true,
+      useTempFiles: true,
+      tempFileDir: config.TEMP_ROOT || path.join(__dirname, "tempFileDir"),
+      safeFileNames: true,
+      preserveExtension: 4,
+    }),
+    (req, res, next) => {
+      // Multipart form tokens become available only after bounded upload parsing.
+      const files = Object.values(req.files || {}).flat();
+      res.on("finish", () => {
+        for (const file of files)
+          if (file.tempFilePath) fs.unlink(file.tempFilePath).catch(() => {});
+      });
+      csrf(req, res, next);
+    },
+    wrap(async (req, res) => {
+      const file = req.files?.uploadedFile;
+      if (!file || Array.isArray(file)) {
+        res.status(400);
+        return res.render("error", {
+          title: "Choose one PDF",
+          message: "Select one PDF of at most 20 MB.",
+        });
+      }
+      try {
+        const buffer = await fs.readFile(file.tempFilePath);
+        const result = await imports.ingest(req.user, {
+          kind: "manual",
+          key: file.name,
+          filename: file.name,
+          buffer,
+        });
+        req.session.notice =
+          result.status === "review"
+            ? "This payslip needs your review."
+            : "Payslip imported successfully.";
+        res.redirect("/imports/" + result.id);
+      } finally {
+        await fs.unlink(file.tempFilePath).catch(() => {});
+      }
+    }),
+  );
+  app.get(
+    "/imports",
+    auth,
+    wrap(async (req, res) => {
+      const data = (
+        await pool.query(
+          "SELECT a.*,s.filename,s.kind FROM import_attempts a JOIN import_sources s ON s.id=a.source_id WHERE s.owner_id=$1 ORDER BY a.created_at DESC LIMIT 200",
+          [ownerId],
+        )
+      ).rows;
+      const state = (await pool.query("SELECT * FROM sync_state WHERE id=1"))
+        .rows[0];
+      res.render("imports", { title: "Imports & sync", data, state });
+    }),
+  );
+  async function attempt(req) {
+    const a = (
+      await pool.query(
+        "SELECT a.*,s.filename,s.payslip_id FROM import_attempts a JOIN import_sources s ON s.id=a.source_id WHERE a.id=$1 AND s.owner_id=$2",
+        [req.params.id, ownerId],
+      )
+    ).rows[0];
+    if (!a) {
+      const e = new Error("Import not found");
+      e.status = 404;
+      throw e;
+    }
+    return a;
+  }
+  app.get(
+    "/imports/:id",
+    auth,
+    wrap(async (req, res) => {
+      const a = await attempt(req);
+      const previous = a.payslip_id
+        ? (
+            await pool.query(
+              "SELECT * FROM payslips WHERE id=$1 AND username=$2",
+              [a.payslip_id, req.user.username],
+            )
+          ).rows[0]
+        : null;
+      const candidates =
+        !previous && a.draft?.pay_date
+          ? (
+              await pool.query(
+                "SELECT * FROM payslips WHERE username=$1 AND pay_date=$2 AND demographics->>'assignment_no'=$3",
+                [
+                  req.user.username,
+                  a.draft.pay_date,
+                  String(a.draft.demographics?.assignment_no),
+                ],
+              )
+            ).rows
+          : [];
+      // A failed extraction still has a validated manual-entry path.
+      if (!a.draft && a.storage_name && a.status === "review")
+        a.draft = {
+          filename: a.filename,
+          demographics: { name: "", assignment_no: "", location: "" },
+          job: { job_title: "", department: "" },
+          wage: { salary: null, employment_type: "salaried" },
+          tax: { ni_number: "", tax_code: "", tax_reference: "" },
+          pay_lines: [
+            { Description: "", Worked: "", Paid: "", Rate: "", Amount: "" },
+          ],
+          deduction_lines: { PAYE: "", NI: "", Pension: "" },
+          year_to_date: { gross_pay: "", taxable_pay: "", tax_paid: "" },
+          this_period_summary: {
+            period_taxable_pay: "",
+            frequency: "",
+            tax_period: "",
+            total_payments: "",
+            total_deductions: "",
+            net_pay: "",
+          },
+          pay_date: "",
+          total_payments: "",
+          total_deductions: "",
+          net_pay: "",
+        };
+      res.render("review", {
+        title: "Review import",
+        a,
+        previous: previous || candidates[0],
+      });
+    }),
+  );
+  app.post(
+    "/imports/:id/review",
+    auth,
+    wrap(async (req, res) => {
+      await attempt(req);
+      let draft;
+      try {
+        draft = JSON.parse(req.body.draft);
+      } catch {
+        const e = new Error("The edited data is not valid JSON");
+        e.status = 400;
+        throw e;
+      }
+      await imports.process(
+        req.user,
+        req.params.id,
+        draft,
+        req.body.confirm === "yes",
+      );
+      res.redirect("/imports/" + req.params.id);
+    }),
+  );
+  app.post(
+    "/imports/:id/retry",
+    auth,
+    wrap(async (req, res) => {
+      const a = await attempt(req);
+      if (["saved", "duplicate"].includes(a.status))
+        return res.redirect("/imports/" + a.id);
+      if (a.storage_name) await imports.process(req.user, a.id);
+      else {
+        await pool.query(
+          "UPDATE import_attempts SET status='failed',next_retry=now() WHERE id=$1",
+          [a.id],
+        );
+        await pool.query("UPDATE sync_state SET requested=true WHERE id=1");
+      }
+      res.redirect("/imports/" + a.id);
+    }),
+  );
+  app.get(
+    "/api/imports",
+    auth,
+    wrap(async (req, res) =>
+      res.json(
+        (
+          await pool.query(
+            "SELECT a.id,a.status,a.errors,a.updated_at,s.filename FROM import_attempts a JOIN import_sources s ON s.id=a.source_id WHERE s.owner_id=$1 ORDER BY a.created_at DESC LIMIT 200",
+            [ownerId],
+          )
+        ).rows,
+      ),
+    ),
+  );
+  let syncRunning = false;
+  app.post(
+    "/api/imports/sync",
+    auth,
+    wrap(async (req, res) => {
+      if (!nextcloud)
+        return res.status(409).json({ error: "Nextcloud is not configured" });
+      await pool.query("UPDATE sync_state SET requested=true WHERE id=1");
+      if (!syncRunning) {
+        syncRunning = true;
+        const { Nextcloud, sync } = require("./lib/nextcloud");
+        Promise.resolve()
+          .then(() =>
+            sync(
+              pool,
+              imports,
+              req.user,
+              new Nextcloud({
+                url: config.NEXTCLOUD_URL,
+                username: config.NEXTCLOUD_USERNAME,
+                password: config.NEXTCLOUD_APP_PASSWORD,
+                folder: config.NEXTCLOUD_FOLDER,
+              }),
+            ),
+          )
+          .catch(() => {})
+          .finally(() => {
+            syncRunning = false;
+          });
+      }
+      res.status(202).json({ status: "queued" });
+    }),
+  );
+  app.get(
+    "/imports/:id/document",
+    auth,
+    wrap(async (req, res) => {
+      const a = await attempt(req);
+      if (!a.storage_name) return res.sendStatus(404);
+      res.type("pdf").sendFile(imports.file(a.storage_name));
+    }),
+  );
+  app.get(
+    "/view_payslip",
+    auth,
+    wrap(async (req, res) => {
+      const p = (
+        await pool.query("SELECT * FROM payslips WHERE id=$1 AND username=$2", [
+          req.query.payslip_id,
+          req.user.username,
+        ])
+      ).rows[0];
+      if (!p) return res.sendStatus(404);
+      const versions = (
+        await pool.query(
+          "SELECT * FROM payslip_versions WHERE payslip_id=$1 ORDER BY created_at DESC,id DESC",
+          [p.id],
+        )
+      ).rows;
+      res.render("detail", {
+        title: "Payslip detail",
+        p: {
+          ...p,
+          categories: categories.categorise(p, categories.loadOverrides()),
+        },
+        versions,
+      });
+    }),
+  );
+  app.get(
+    "/documents/:id",
+    auth,
+    wrap(async (req, res) => {
+      const p = (
+        await pool.query("SELECT * FROM payslips WHERE id=$1 AND username=$2", [
+          req.params.id,
+          req.user.username,
+        ])
+      ).rows[0];
+      if (!p) return res.sendStatus(404);
+      if (p.raw_hash)
+        return res.type("pdf").sendFile(imports.file(p.raw_hash + ".pdf"));
+      if (
+        path.basename(p.filename) !== p.filename ||
+        path.basename(req.user.username) !== req.user.username
+      )
+        return res.sendStatus(404);
+      res
+        .type("pdf")
+        .sendFile(
+          path.join(
+            __dirname,
+            "payslips",
+            req.user.username,
+            "processed",
+            p.filename,
+          ),
+        );
+    }),
+  );
+  app.get(
+    "/versions/:id/document",
+    auth,
+    wrap(async (req, res) => {
+      const v = (
+        await pool.query(
+          "SELECT v.* FROM payslip_versions v JOIN payslips p ON p.id=v.payslip_id WHERE v.id=$1 AND p.username=$2",
+          [req.params.id, req.user.username],
+        )
+      ).rows[0];
+      if (!v?.storage_name) return res.sendStatus(404);
+      res.type("pdf").sendFile(imports.file(v.storage_name));
+    }),
+  );
+  app.get("/view_pending_payslips", auth, (req, res) =>
+    res.redirect("/imports"),
+  );
+  app.use((req, res) =>
+    res.status(404).render("error", {
+      title: "Page not found",
+      message:
+        "This page is no longer available. Use the navigation to continue.",
+    }),
+  );
+  app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    const status = err.status || 500;
+    if (req.path.startsWith("/api/"))
+      return res.status(status).json({
+        error: status < 500 ? err.message : "Request failed. Please retry.",
+      });
+    res.status(status).render("error", {
+      title: status < 500 ? "Check your request" : "Something went wrong",
+      message:
+        status < 500
+          ? err.message
+          : "The request could not be completed. Your saved payslips are unchanged. Please retry.",
+    });
+  });
+  return app;
+}
+if (require.main === module) {
+  const pool = require("./database");
+  const app = createApp(pool);
+  app.listen(
+    Number(process.env.PORT || 52535),
+    process.env.HOST || "127.0.0.1",
+    () => console.log("Payslip app listening"),
+  );
+}
+module.exports = { createApp };

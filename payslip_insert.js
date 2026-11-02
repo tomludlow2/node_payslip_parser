@@ -1,6 +1,6 @@
-const fs = require('fs');
-const pool = require('./database'); // Import the PostgreSQL connection pool
-const crypto = require('crypto');
+const fs = require("fs");
+const pool = require("./database"); // Import the PostgreSQL connection pool
+const crypto = require("crypto");
 
 // Function to insert payslip data into PostgreSQL
 async function send_to_postgres(username, payslipData, override = false) {
@@ -20,8 +20,10 @@ async function send_to_postgres(username, payslipData, override = false) {
         $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb,
         $11::numeric, $12::numeric, $13::date, $14::numeric, $15
       )
-      ON CONFLICT (file_hash) 
-      ${override ? `
+      ON CONFLICT (file_hash)
+      ${
+        override
+          ? `
       DO UPDATE SET
         username = EXCLUDED.username,
         filename = EXCLUDED.filename,
@@ -37,20 +39,34 @@ async function send_to_postgres(username, payslipData, override = false) {
         total_deductions = EXCLUDED.total_deductions,
         pay_date = EXCLUDED.pay_date,
         net_pay = EXCLUDED.net_pay
-      ` : `
+      `
+          : `
       DO NOTHING
-      `}
+      `
+      }
     `;
 
     // Extract data from payslipData
     const {
-      filename, demographics, job, wage, tax,
-      deduction_lines, pay_lines, this_period_summary,
-      year_to_date, total_payments, total_deductions,
-      pay_date, net_pay
+      filename,
+      demographics,
+      job,
+      wage,
+      tax,
+      deduction_lines,
+      pay_lines,
+      this_period_summary,
+      year_to_date,
+      total_payments,
+      total_deductions,
+      pay_date,
+      net_pay,
     } = payslipData;
 
-    const hash = crypto.createHash('sha256').update(JSON.stringify(payslipData)).digest('hex');
+    const hash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify(payslipData))
+      .digest("hex");
 
     // Execute the query with parameters
     try {
@@ -69,26 +85,32 @@ async function send_to_postgres(username, payslipData, override = false) {
         total_deductions,
         new Date(pay_date), // Ensure pay_date is converted to a Date object
         net_pay,
-        hash
+        hash,
       ]);
 
       if (result.rowCount === 0) {
-        console.log(`Payslip data for ${username} already exists and was not inserted.`);
-        return { status: 'duplicate', message: `That payslip for ${username} already exists and wasn't automatically inserted, please confirm if you would like to override it.` }
-
+        console.log(
+          `Payslip data for ${username} already exists and was not inserted.`,
+        );
+        return {
+          status: "duplicate",
+          message: `That payslip for ${username} already exists and wasn't automatically inserted, please confirm if you would like to override it.`,
+        };
       } else {
-        console.log(`Inserted/Updated payslip data for ${username}: ${result.rowCount} rows affected`);
-        return { status: 'success', message: 'Success, the payslip was stored successfully'}
+        console.log(
+          `Inserted/Updated payslip data for ${username}: ${result.rowCount} rows affected`,
+        );
+        return {
+          status: "success",
+          message: "Success, the payslip was stored successfully",
+        };
       }
-
-
     } catch (error) {
-      console.error('Error executing query:', error.message);
-      throw new Error('Database error');
+      console.error("Error executing query:", error.message);
+      throw new Error("Database error");
     }
-
   } catch (error) {
-    console.error('Error inserting payslip data:', error.message);
+    throw error;
   } finally {
     // Release the client back to the pool
     if (client) {
@@ -97,4 +119,4 @@ async function send_to_postgres(username, payslipData, override = false) {
   }
 }
 
-module.exports = {send_to_postgres};
+module.exports = { send_to_postgres };

@@ -1,3 +1,13 @@
+# Paybook
+
+A private, single-owner payslip dashboard with validated PDF imports, version history, and Nextcloud WebDAV automation.
+
+See [OPERATIONS.md](OPERATIONS.md) for configuration, backups, migrations, deployment, sync setup, and verification. Start with `.env.example`; `OWNER_ID` and a strong `SESSION_SECRET` are required.
+
+The documentation below describes the original parsing utilities and is retained as historical reference. Use the deployment instructions above for the web application.
+
+---
+
 # node_payslip_parser
 
 This uses node, and node package parse-pdf to open PDF files generated from the NHS ESR hub to convert payslips into a format that can be:

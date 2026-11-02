@@ -1,0 +1,24 @@
+Pay Lines:
+BasicPay = Basic Pay
+AddnRosterHoursNP = Additional Hours
+FlexPTTrans2019 = Less than full time allowance
+FlexPayEmMed2016 = EM Pay Supplement
+NightDuty37% = Night Pay
+Weekend<1:x-1:y = Weekend Pay 1:x-1:y
+CarPark = Car Parking
+BusinessMilesTASNT = Excess Mileage Claim (TASNT)
+ExcessTravelNPNT = Excess Mileage Claim (NPNT)
+MiscTravelNPNT = Expenses Claim (NPNT)
+CourseExpenses = Course Expenses
+(Any pay line ending in Arrs) = As above, but with Arrears afterwards e.g. Basic Pay Arrears
+
+
+
+Deduction Lines
+NIA/ = National Insurance
+PAYE = PAYE Tax
+StudentLoan = Student Loan
+(Mentions word "mess") = Doctors' Mess
+NHSPensionFund(x)% = NHS Pension x%
+
+(Any deduction line with Arrs) = As above, but with Arrears afterwards e.g. NHS Pension 10.7% Arrears

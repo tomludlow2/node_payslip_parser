@@ -1,3 +1,4 @@
+require("./lib/pg-types");
 // database.js
 
 /*
@@ -10,8 +11,8 @@ PGPASSWORD=your_password_here
 PGPORT=5432
 */
 
-require('dotenv').config(); // Load environment variables from .env file
-const { Pool } = require('pg');
+require("dotenv").config(); // Load environment variables from .env file
+const { Pool } = require("pg");
 
 // Configure the PostgreSQL connection pool
 const pool = new Pool({
